@@ -7,6 +7,7 @@ import {
   getCachedContract,
   getCachedStats,
   getEventsByIds,
+  getPot,
   getSyncState,
   listAllEvents,
   listEventIds,
@@ -17,7 +18,13 @@ import {
 import { config, requireContract, resolveRequestContext } from "./config.js";
 import { decodeClarityResult } from "./decoder.js";
 import { serializeArgs } from "./encode.js";
-import { callReadOnly, parseContractId, parseFunctionName } from "./hiro.js";
+import {
+  callReadOnly,
+  fetchAddressBalances,
+  fetchTransaction,
+  parseContractId,
+  parseFunctionName,
+} from "./hiro.js";
 import { networkFromPrincipal } from "./network.js";
 import { POT_STATUSES } from "./pots.js";
 import { computeStatistics } from "./stats.js";
@@ -99,17 +106,20 @@ app.get("/events", async (req, res, next) => {
   try {
     const ctx = requestContext(req);
     requireContract(ctx);
-    const { limit, offset } = parseLimitOffset(req.query);
     const eventName = req.query.event ? String(req.query.event) : null;
     const pot = req.query.pot ? String(req.query.pot) : null;
     const raw = req.query.raw === "1" || req.query.raw === "true";
+    const all = req.query.all === "1" || req.query.all === "true";
+    const { limit, offset } = all
+      ? { limit: 1_000_000, offset: 0 }
+      : parseLimitOffset(req.query);
     const { ids, total } = await listEventIds({ ...ctx, eventName, pot, offset, limit });
     const events = (await getEventsByIds(ids, ctx)).map((event) => publicEvent(event, raw));
     res.json({
       ...networkEnvelope(ctx),
       events,
       total,
-      limit,
+      limit: all ? events.length : limit,
       offset,
     });
   } catch (error) {
@@ -144,6 +154,49 @@ app.get("/pots", async (req, res, next) => {
     }
     const pots = await listPots({ ...ctx, status });
     res.json({ ...networkEnvelope(ctx), pots, total: pots.length, status: status ?? "all" });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get("/pots/:address", async (req, res, next) => {
+  try {
+    const ctx = requestContext(req);
+    requireContract(ctx);
+    const address = decodeURIComponent(req.params.address);
+    if (address === "stats") {
+      statsHandler(req, res, next);
+      return;
+    }
+    const pot = await getPot(address, ctx);
+    if (!pot) {
+      res.status(404).json({ error: "Pot not found", address, ...networkEnvelope(ctx) });
+      return;
+    }
+    res.json({ ...networkEnvelope(ctx), pot });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get("/tx/:txId", async (req, res, next) => {
+  try {
+    const ctx = requestContext(req);
+    const txId = decodeURIComponent(req.params.txId);
+    const tx = await fetchTransaction(txId, ctx.stacksApiUrl);
+    res.json({ ...networkEnvelope(ctx), tx });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get("/balances/:address", async (req, res, next) => {
+  try {
+    const ctx = requestContext(req);
+    const address = decodeURIComponent(req.params.address);
+    const unanchored = req.query.unanchored !== "0" && req.query.unanchored !== "false";
+    const balances = await fetchAddressBalances(address, ctx.stacksApiUrl, { unanchored });
+    res.json({ ...networkEnvelope(ctx), address, balances });
   } catch (error) {
     next(error);
   }

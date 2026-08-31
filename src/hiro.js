@@ -213,6 +213,25 @@ export async function callReadOnly({
   };
 }
 
+export async function fetchHiroPath(apiUrl, path) {
+  const base = String(apiUrl ?? "").replace(/\/$/, "");
+  const suffix = path.startsWith("/") ? path : `/${path}`;
+  return fetchJson(`${base}${suffix}`);
+}
+
+export async function fetchTransaction(txId, apiUrl) {
+  const id = String(txId ?? "").startsWith("0x") ? String(txId) : `0x${txId}`;
+  return fetchHiroPath(apiUrl, `/extended/v1/tx/${encodeURIComponent(id)}`);
+}
+
+export async function fetchAddressBalances(address, apiUrl, { unanchored = true } = {}) {
+  const query = new URLSearchParams({ unanchored: unanchored ? "true" : "false" });
+  return fetchHiroPath(
+    apiUrl,
+    `/extended/v1/address/${encodeURIComponent(address)}/balances?${query}`,
+  );
+}
+
 export function parseContractId(address, name) {
   const joined = name
     ? `${String(address ?? "").trim()}.${String(name).trim()}`
