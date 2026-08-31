@@ -38,7 +38,10 @@ export async function connectRedis() {
   client = createClient({
     url,
     socket: useTls
-      ? { tls: true, rejectUnauthorized: true }
+      ? {
+          tls: true,
+          rejectUnauthorized: process.env.REDIS_TLS_INSECURE !== "1",
+        }
       : undefined,
   });
   client.on("error", (err) => {

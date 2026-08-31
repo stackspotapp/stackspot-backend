@@ -6,25 +6,38 @@ import {
   networkFromPrincipal,
   parseNetwork,
 } from "./network.js";
+import { buildRedisUrl } from "./redisEnv.js";
 
 loadEnv({ path: resolve(fileURLToPath(new URL("..", import.meta.url)), ".env") });
 
-const defaultNetwork = parseNetwork(process.env.NETWORK);
-if (!defaultNetwork) {
-  throw new Error("NETWORK is required and must be mainnet or testnet");
-}
+const DEFAULT_CONTRACTS = {
+  mainnet: "SP2HXAW0GEHMXGHR0PG44443HV0S58WSZQY4V26W1.stackspots",
+  testnet: "ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.stackspots",
+};
 
 function trim(value) {
   const text = String(value ?? "").trim();
   return text || null;
 }
 
+function resolveDefaultNetwork() {
+  return (
+    parseNetwork(process.env.NETWORK) ??
+    networkFromPrincipal(process.env.STACKSPOTS_CONTRACT) ??
+    (trim(process.env.STACKSPOTS_CONTRACT_MAINNET) ? "mainnet" : null) ??
+    (trim(process.env.STACKSPOTS_CONTRACT_TESTNET) ? "testnet" : null) ??
+    "mainnet"
+  );
+}
+
+const defaultNetwork = resolveDefaultNetwork();
+
 function contractFor(network) {
   const named = trim(process.env[`STACKSPOTS_CONTRACT_${network.toUpperCase()}`]);
   if (named) return named;
   const generic = trim(process.env.STACKSPOTS_CONTRACT);
   if (generic && networkFromPrincipal(generic) === network) return generic;
-  return null;
+  return DEFAULT_CONTRACTS[network] ?? null;
 }
 
 const contracts = {
@@ -52,7 +65,7 @@ export function resolveRequestContext(rawNetwork) {
 export const config = {
   port: Number(process.env.PORT ?? 8787),
   host: process.env.HOST ?? "0.0.0.0",
-  redisUrl: process.env.REDIS_URL ?? "redis://127.0.0.1:6379",
+  redisUrl: buildRedisUrl(),
   defaultNetwork,
   network: defaultNetwork,
   contracts,

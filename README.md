@@ -33,15 +33,20 @@ npm start
 
 Dev reload: `npm run dev`. Decoder tests: `npm test`.
 
+Hosted deploys (Docker, Heroku, Redis Cloud app hosts) do **not** load `.env` — that file is gitignored. Set the same keys as config vars in the host dashboard. Paste `REDIS_URL` from the Redis Cloud console (`redis://…` or `rediss://…` if TLS is on). You can also set `REDIS_ENDPOINT_URI` + `REDIS_PASSWORD` instead of `REDIS_URL`. Set `REDIS_TLS=1` to force TLS on a `redis://` URL.
+
+The `npm warn config production Use --omit=dev instead` line from the host is harmless.
+
 ## Env
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
 | `PORT` | `8787` | HTTP port |
-| `REDIS_URL` | `redis://127.0.0.1:6379` | Redis connection |
-| `NETWORK` | required | Default when `?network=` is omitted (`mainnet` or `testnet`) |
-| `STACKSPOTS_CONTRACT_MAINNET` | from `STACKSPOTS_CONTRACT` if `SP`/`SM` | Mainnet Stackspots `address.name` |
-| `STACKSPOTS_CONTRACT_TESTNET` | from `STACKSPOTS_CONTRACT` if `ST`/`SN` | Testnet Stackspots `address.name` |
+| `REDIS_URL` | `redis://127.0.0.1:6379` | Redis connection (`rediss://` for Redis Cloud) |
+| `REDIS_ENDPOINT_URI` / `REDIS_PASSWORD` | — | Alternate Redis Cloud credentials if `REDIS_URL` is unset |
+| `NETWORK` | `mainnet` | Default when `?network=` is omitted (`mainnet` or `testnet`) |
+| `STACKSPOTS_CONTRACT_MAINNET` | `SP2HX…W1.stackspots` | Mainnet Stackspots `address.name` |
+| `STACKSPOTS_CONTRACT_TESTNET` | `ST1PQ…GM.stackspots` | Testnet Stackspots `address.name` |
 | `STACKSPOTS_CONTRACT` | — | Fallback mapped to mainnet or testnet from the principal prefix |
 | `STACKS_API_URL` | from `NETWORK` | Optional override for the selected network |
 | `STACKS_MAINNET_API_URL` | `https://api.hiro.so` | Mainnet Hiro host |
@@ -107,7 +112,7 @@ GET /events?network=mainnet
 POST /sync?network=testnet
 ```
 
-Omit `network` to use `NETWORK` from `.env`.
+Omit `network` to use `NETWORK` (from the environment, or `mainnet` if unset).
 
 Every contract print with an `event` key is indexed. Platform prints (`admin added/updated`, `public pot deploy status updated`, `pot contract hash set`) stay on `/events` only. Pot prints update the matching pot row:
 
