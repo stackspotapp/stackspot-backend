@@ -64,9 +64,12 @@ The `npm warn config production Use --omit=dev instead` line from the host is ha
 | --- | --- | --- |
 | `GET` | `/health` | Redis + last sync. `?network=mainnet\|testnet` selects contract + Hiro |
 | `GET` | `/catalog` | Known event names/fields |
-| `GET` | `/events` | `network`, `event`, `pot`, `limit`, `offset`, `raw=1` |
+| `GET` | `/events` | `network`, `event`, `pot`, `sponsor`, `limit`, `offset`, `raw=1` |
 | `GET` | `/events/:id` | One event including raw hex |
 | `GET` | `/pots` | `network`, `status=deployed\|joinable\|started\|cancelled\|claimed` |
+| `GET`/`POST` | `/pots/details` | Live `get-pot-details` + extras. Query/body: `owner`, `contract` (`ADDRESS.NAME`), `sponsor` (`ADDRESS.NAME`), `refresh=1` |
+| `GET` | `/sponsors` | Derived sponsor contracts from `platform sponsor contract added`, `sponsor-platform`, and `sponsor event` |
+| `GET` | `/sponsors/:address` | One sponsor plus cached events (`address` is `sponsor-contract` or wallet) |
 | `GET` | `/stats` | Same as pots, plus join/stake/claim totals (`/pots/stats` alias) |
 | `GET`/`POST` | `/contracts/:address/:name/:function` | Read-only call on that contract |
 | `GET`/`POST` | `/contracts/:address.name/:function` | Same, `ADDRESS.NAME` + function |
@@ -114,7 +117,7 @@ POST /sync?network=testnet
 
 Omit `network` to use `NETWORK` (from the environment, or `mainnet` if unset).
 
-Every contract print with an `event` key is indexed. Platform prints (`admin added/updated`, `public pot deploy status updated`, `pot contract hash set`) stay on `/events` only. Pot prints update the matching pot row:
+Every contract print with an `event` key is indexed. Platform prints (`admin added/updated`, `public pot deploy status updated`, `pot contract hash set`, `platform sponsor contract added`, `sponsor-platform`) stay on `/events` (and update `/sponsors` when they name a sponsor contract). Pot prints update the matching pot row:
 
 | Event key | Pot status |
 | --- | --- |
@@ -124,7 +127,31 @@ Every contract print with an `event` key is indexed. Platform prints (`admin add
 | `cancel-pot`, `fall-back-cancel` | cancelled |
 | `claim-pot-reward` | claimed |
 
-Status only moves forward. Sync pulls Stackspots first, then each known pot contract, so pot-only prints (`init-pot`, `start-stackspot-*`, `stake-treasury`, …) are included. Join/claim prints that appear on both the pot and Stackspots are counted once.
+Status only moves forward. Sync pulls Stackspots first, then each known pot contract, then each known sponsor contract, so pot-only prints (`init-pot`, `start-stackspot-*`, `stake-treasury`, …) and sponsor-only prints (`sponsor event`) are included. Join/claim/`sponsor-platform` prints that appear on both a child contract and Stackspots are counted once.
+
+Sponsor prints:
+
+| Event key | Source | Cached as |
+| --- | --- | --- |
+| `platform sponsor contract added` | stackspots | `/sponsors` allowlist + `/events` |
+| `sponsor-platform` | stackspot-sponsor + stackspots `log-sponsor-platform` | `/sponsors` lock + `/events?event=sponsor-platform` |
+| `sponsor event` | stackspot-sponsor only (`log-sponsor-event`) | `/sponsors` tickets + `/events?event=sponsor%20event` or `?sponsor=` |
+
+`GET /pots/details` is the profile / pot-profile read. Pass any combination of:
+
+- `owner` — Stacks principal. Used as `sender` for `get-pot-details` (`is-joined` is sender-specific) and to filter cached pots by pot-owner / pot-admin / deployer.
+- `contract` — pot `ADDRESS.NAME`. Loads that pot even if it is not in the Redis registry yet.
+- `sponsor` — platform sponsor `ADDRESS.NAME`. Filters to pots that bound that contract at init (or have a cached `sponsor event` ticket) and includes `get-platform-sponsor-ticket`.
+
+Each pot row includes the cached registry record, live `get-pot-details` (`values` + `clarity`), extras (`get-pot-is-init`, `get-pot-id`, `get-pot-cycle`, `get-pot-name`, min/max, sequential session fields), and `is-contract-allowed-hash` from Stackspots. Results are Redis-cached like `/contracts` (`CONTRACT_CACHE_TTL_SECONDS`). Cap is `POT_DETAILS_MAX` (default 40).
+
+```http
+GET /pots/details?network=testnet&owner=ST1…&contract=ST1….jackpot&sponsor=ST1….stackspot-sponsor
+POST /pots/details?network=testnet
+Content-Type: application/json
+
+{ "owner": "ST1…", "contract": "ST1….jackpot", "sponsor": "ST1….stackspot-sponsor" }
+```
 
 `GET /contracts/:address/:name/:function` runs Hiro `call-read` on that contract. Pass `sender` when the read uses `tx-sender`. Optional `args` (JSON array) and `refresh=1`.
 

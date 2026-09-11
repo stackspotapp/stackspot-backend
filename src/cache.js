@@ -7,6 +7,13 @@ import {
   POT_STATUSES,
   resolvePotAddress,
 } from "./pots.js";
+import {
+  applyEventToSponsor,
+  mergeSponsorRecord,
+  normalizeListedSponsor,
+  resolveSponsorContract,
+  sponsorIndexKeys,
+} from "./sponsors.js";
 
 function keysFor(network) {
   const ns = `stackspots:${network ?? config.defaultNetwork}`;
@@ -16,6 +23,8 @@ function keysFor(network) {
     byEvent: (name) => `${ns}:by-event:${name}`,
     byPot: (pot) => `${ns}:by-pot:${pot}`,
     pots: `${ns}:pots`,
+    sponsors: `${ns}:sponsors`,
+    bySponsor: (id) => `${ns}:by-sponsor:${id}`,
     sync: `${ns}:sync`,
     ids: `${ns}:ids`,
     contract: (id) => `${ns}:contract:${id}`,
@@ -102,6 +111,9 @@ export async function saveEvents(events, ctx = {}) {
     for (const pot of potIndexKeys(event, contract)) {
       multi.zAdd(keys.byPot(pot), { score, value: id });
     }
+    for (const sponsor of sponsorIndexKeys(event, contract)) {
+      multi.zAdd(keys.bySponsor(sponsor), { score, value: id });
+    }
     await multi.exec();
     stored += 1;
   }
@@ -127,6 +139,27 @@ export async function saveEvents(events, ctx = {}) {
     if (merged) await redis.hSet(keys.pots, address, JSON.stringify(merged));
   }
 
+  const incomingBySponsor = new Map();
+  for (const event of events) {
+    const address = resolveSponsorContract(event, contract);
+    if (!address) continue;
+    const next = applyEventToSponsor(incomingBySponsor.get(address), event, contract);
+    if (next) incomingBySponsor.set(address, next);
+  }
+  for (const [address, incoming] of incomingBySponsor) {
+    const existingRaw = await redis.hGet(keys.sponsors, address);
+    let existing = null;
+    if (existingRaw) {
+      try {
+        existing = JSON.parse(existingRaw);
+      } catch {
+        existing = null;
+      }
+    }
+    const merged = mergeSponsorRecord(existing, incoming);
+    if (merged) await redis.hSet(keys.sponsors, address, JSON.stringify(merged));
+  }
+
   if (stored) await invalidateStats(ctx);
   return stored;
 }
@@ -139,14 +172,16 @@ export async function areEventIdsKnown(ids, ctx = {}) {
   return flags.map((flag) => Boolean(flag));
 }
 
-export async function listEventIds({ eventName, pot, offset = 0, limit = 50, ...ctx } = {}) {
+export async function listEventIds({ eventName, pot, sponsor, offset = 0, limit = 50, ...ctx } = {}) {
   const redis = getRedis();
   const { keys } = scope(ctx);
   const key = eventName
     ? keys.byEvent(eventName)
-    : pot != null && pot !== ""
-      ? keys.byPot(String(pot))
-      : keys.events;
+    : sponsor != null && sponsor !== ""
+      ? keys.bySponsor(String(sponsor))
+      : pot != null && pot !== ""
+        ? keys.byPot(String(pot))
+        : keys.events;
 
   const start = Math.max(0, offset);
   const stop = start + Math.max(1, limit) - 1;
@@ -217,6 +252,48 @@ export async function getSyncState(ctx = {}) {
     mode: raw.mode || null,
     error: raw.error || null,
   };
+}
+
+export async function listSponsors(ctx = {}) {
+  const redis = getRedis();
+  const { keys } = scope(ctx);
+  const all = await redis.hGetAll(keys.sponsors);
+  return Object.values(all)
+    .map((raw) => {
+      try {
+        return normalizeListedSponsor(JSON.parse(raw));
+      } catch {
+        return null;
+      }
+    })
+    .filter(Boolean)
+    .sort((a, b) => Number(b.lastBlockHeight ?? 0) - Number(a.lastBlockHeight ?? 0));
+}
+
+export async function getSponsor(key, ctx = {}) {
+  if (key == null || key === "") return null;
+  const redis = getRedis();
+  const { keys } = scope(ctx);
+  const needle = String(key);
+  const direct = await redis.hGet(keys.sponsors, needle);
+  if (direct) {
+    try {
+      return normalizeListedSponsor(JSON.parse(direct));
+    } catch {
+      return null;
+    }
+  }
+  const sponsors = await listSponsors(ctx);
+  const lower = needle.toLowerCase();
+  return (
+    sponsors.find(
+      (row) =>
+        row.sponsorContract === needle ||
+        row.sponsor === needle ||
+        String(row.sponsorContract ?? "").toLowerCase() === lower ||
+        String(row.sponsor ?? "").toLowerCase() === lower,
+    ) ?? null
+  );
 }
 
 export async function getPot(key, ctx = {}) {

@@ -225,4 +225,27 @@ export const STACKSPOTS_EVENTS = {
       "pot-cancelled",
     ],
   },
+  "platform sponsor contract added": {
+    source: "stackspots",
+    kind: "sponsor",
+    fields: ["event", "contract-address", "hash"],
+  },
+  "sponsor-platform": {
+    source: "sponsor",
+    kind: "sponsor",
+    fields: [
+      "event",
+      "amount",
+      "cycles",
+      "rule-list",
+      "sponsor",
+      "sponsor-contract",
+      "burn-block-height",
+    ],
+  },
+  "sponsor event": {
+    source: "sponsor",
+    kind: "sponsor",
+    fields: ["event", "ticket-id", "pot-contract", "pot-details"],
+  },
 };

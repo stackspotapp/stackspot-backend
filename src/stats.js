@@ -42,12 +42,16 @@ export function computeStatistics(events = [], listedPots = [], { stackspotsCont
   }
 
   const byEvent = {};
-  const participants = new Set();
+    const participants = new Set();
   const sponsors = new Set();
+  const platformSponsors = new Set();
+  const platformSponsorContracts = new Set();
   const seenActivity = new Set();
   const aggByPot = new Map();
   let stxJoined = 0n;
   let stxSponsored = 0n;
+  let platformSponsorStx = 0n;
+  let sponsorEventCount = 0;
   let yieldClaimed = 0n;
   let deployFees = 0n;
   let staked = 0n;
@@ -137,6 +141,14 @@ export function computeStatistics(events = [], listedPots = [], { stackspotsCont
         aggByPot.set(potAddress, agg);
       }
     }
+    if (name === "sponsor-platform" && unique) {
+      platformSponsorStx += asBig(values.amount);
+      if (values.sponsor) platformSponsors.add(values.sponsor);
+      if (values["sponsor-contract"]) platformSponsorContracts.add(values["sponsor-contract"]);
+    }
+    if (name === "sponsor event" && unique) {
+      sponsorEventCount += 1;
+    }
   }
 
   const byStatus = Object.fromEntries(POT_STATUSES.map((status) => [status, 0]));
@@ -186,6 +198,10 @@ export function computeStatistics(events = [], listedPots = [], { stackspotsCont
       deployFees: deployFees.toString(),
       staked: staked.toString(),
       rewardsPaid: rewardsPaid.toString(),
+      platformSponsors: platformSponsors.size,
+      platformSponsorContracts: platformSponsorContracts.size,
+      platformSponsorStx: platformSponsorStx.toString(),
+      sponsorEvents: sponsorEventCount,
     },
     byType,
     byStatus,

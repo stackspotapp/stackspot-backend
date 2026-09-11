@@ -4,6 +4,8 @@ export const PLATFORM_EVENTS = new Set([
   "admin added/updated",
   "public pot deploy status updated",
   "pot contract hash set",
+  "platform sponsor contract added",
+  "sponsor-platform",
 ]);
 
 /** Event key → current pot status. Rank never moves backwards. */

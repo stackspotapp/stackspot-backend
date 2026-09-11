@@ -96,6 +96,45 @@ test("organises pots and stats from every contract event key", () => {
         blockHeight: 1,
         values: { enable: true },
       },
+      {
+        event: "platform sponsor contract added",
+        txId: "0x20",
+        blockHeight: 2,
+        values: { "contract-address": "ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.stackspot-sponsor" },
+      },
+      {
+        event: "sponsor-platform",
+        txId: "0x21",
+        eventIndex: 0,
+        contractId: STACKSPOTS,
+        blockHeight: 3,
+        values: {
+          amount: "40000000",
+          cycles: "10",
+          sponsor: SPONSOR,
+          "sponsor-contract": "ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.stackspot-sponsor",
+        },
+      },
+      {
+        event: "sponsor-platform",
+        txId: "0x21",
+        eventIndex: 1,
+        contractId: "ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.stackspot-sponsor",
+        blockHeight: 3,
+        values: {
+          amount: "40000000",
+          cycles: "10",
+          sponsor: SPONSOR,
+          "sponsor-contract": "ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.stackspot-sponsor",
+        },
+      },
+      {
+        event: "sponsor event",
+        txId: "0x22",
+        contractId: "ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.stackspot-sponsor",
+        blockHeight: 4,
+        values: { "ticket-id": "1", "pot-contract": POT },
+      },
     ],
     [],
     { stackspotsContract: STACKSPOTS },
@@ -121,6 +160,11 @@ test("organises pots and stats from every contract event key", () => {
   assert.equal(stats.byStatus.cancelled, 1);
   assert.equal(stats.byEvent["join-pot"], 2);
   assert.equal(stats.byEvent["admin added/updated"], 1);
+  assert.equal(stats.totals.platformSponsors, 1);
+  assert.equal(stats.totals.platformSponsorContracts, 1);
+  assert.equal(stats.totals.platformSponsorStx, "40000000");
+  assert.equal(stats.totals.sponsorEvents, 1);
+  assert.equal(stats.platformEvents["sponsor-platform"], 2);
 
   const jackpot = stats.pots.find((pot) => pot.potAddress === POT);
   assert.equal(jackpot.status, "claimed");

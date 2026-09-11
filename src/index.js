@@ -8,10 +8,12 @@ import {
   getCachedStats,
   getEventsByIds,
   getPot,
+  getSponsor,
   getSyncState,
   listAllEvents,
   listEventIds,
   listPots,
+  listSponsors,
   setCachedContract,
   setCachedStats,
 } from "./cache.js";
@@ -27,6 +29,11 @@ import {
 } from "./hiro.js";
 import { networkFromPrincipal } from "./network.js";
 import { POT_STATUSES } from "./pots.js";
+import {
+  collectPotDetails,
+  parseOptionalContractId,
+  parseOptionalPrincipal,
+} from "./potDetails.js";
 import { computeStatistics } from "./stats.js";
 import { runSyncAll, runSyncSafe } from "./sync.js";
 
@@ -93,7 +100,8 @@ app.get("/catalog", (req, res, next) => {
       notes: {
         values: "Fully unwrapped Clarity JSON. uint/int are strings; optional none is null; principals are strings; buffers are 0x-hex.",
         clarity: "Typed tree matching `values` (type + value) for frontend rendering.",
-        pots: "GET /pots status comes from the event key: pre-init=deployed, init-pot/pot-registered/pot mint/join-*=joinable, start-stackspot-*/stake-*=started, cancel-pot/fall-back-cancel=cancelled, claim-pot-reward=claimed.",
+        pots: "GET /pots status comes from the event key: pre-init=deployed, init-pot/pot-registered/pot mint/join-*=joinable, start-stackspot-*/stake-*=started, cancel-pot/fall-back-cancel=cancelled, claim-pot-reward=claimed. GET /pots/details?owner=&contract=&sponsor= returns live get-pot-details (sender=owner) plus extras for profile and pot profile pages.",
+        sponsors: "GET /sponsors is derived from platform sponsor contract added, sponsor-platform, and sponsor event prints. Sync pulls stackspots, then pots, then known sponsor contracts so sponsor event logs (printed only on stackspot-sponsor) are cached. Filter events with ?event=sponsor%20event or ?sponsor=ADDRESS.NAME.",
         network: "Pass ?network=mainnet or ?network=testnet to select STACKSPOTS_CONTRACT_MAINNET / STACKSPOTS_CONTRACT_TESTNET, Hiro host, and Redis namespace.",
       },
     });
@@ -108,12 +116,13 @@ app.get("/events", async (req, res, next) => {
     requireContract(ctx);
     const eventName = req.query.event ? String(req.query.event) : null;
     const pot = req.query.pot ? String(req.query.pot) : null;
+    const sponsor = req.query.sponsor ? String(req.query.sponsor) : null;
     const raw = req.query.raw === "1" || req.query.raw === "true";
     const all = req.query.all === "1" || req.query.all === "true";
     const { limit, offset } = all
       ? { limit: 1_000_000, offset: 0 }
       : parseLimitOffset(req.query);
-    const { ids, total } = await listEventIds({ ...ctx, eventName, pot, offset, limit });
+    const { ids, total } = await listEventIds({ ...ctx, eventName, pot, sponsor, offset, limit });
     const events = (await getEventsByIds(ids, ctx)).map((event) => publicEvent(event, raw));
     res.json({
       ...networkEnvelope(ctx),
@@ -159,6 +168,45 @@ app.get("/pots", async (req, res, next) => {
   }
 });
 
+async function potDetailsHandler(req, res, next) {
+  try {
+    const ctx = requestContext(req);
+    requireContract(ctx);
+    const query = { ...req.query, ...(req.body ?? {}) };
+    const owner = parseOptionalPrincipal(query.owner ?? query.sender, "owner");
+    const contract = parseOptionalContractId(query.contract ?? query.pot, "contract");
+    const sponsorContract = parseOptionalContractId(
+      query.sponsor ?? query.sponsorContract ?? query["sponsor-contract"],
+      "sponsor",
+    );
+    if (!owner && !contract && !sponsorContract) {
+      const error = new Error("Pass owner, contract (ADDRESS.NAME), and/or sponsor (ADDRESS.NAME)");
+      error.status = 400;
+      throw error;
+    }
+    const refresh = query.refresh === "1" || query.refresh === true || query.refresh === "true";
+    const [pots, sponsor] = await Promise.all([
+      listPots(ctx),
+      sponsorContract ? getSponsor(sponsorContract, ctx) : Promise.resolve(null),
+    ]);
+    const payload = await collectPotDetails({
+      owner,
+      contract,
+      sponsorContract,
+      pots,
+      sponsor,
+      refresh,
+      ctx,
+    });
+    res.json({ ...networkEnvelope(ctx), ...payload });
+  } catch (error) {
+    next(error);
+  }
+}
+
+app.get("/pots/details", potDetailsHandler);
+app.post("/pots/details", potDetailsHandler);
+
 app.get("/pots/:address", async (req, res, next) => {
   try {
     const ctx = requestContext(req);
@@ -168,12 +216,55 @@ app.get("/pots/:address", async (req, res, next) => {
       statsHandler(req, res, next);
       return;
     }
+    if (address === "details") {
+      potDetailsHandler(req, res, next);
+      return;
+    }
     const pot = await getPot(address, ctx);
     if (!pot) {
       res.status(404).json({ error: "Pot not found", address, ...networkEnvelope(ctx) });
       return;
     }
     res.json({ ...networkEnvelope(ctx), pot });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get("/sponsors", async (req, res, next) => {
+  try {
+    const ctx = requestContext(req);
+    requireContract(ctx);
+    const sponsors = await listSponsors(ctx);
+    res.json({ ...networkEnvelope(ctx), sponsors, total: sponsors.length });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get("/sponsors/:address", async (req, res, next) => {
+  try {
+    const ctx = requestContext(req);
+    requireContract(ctx);
+    const address = decodeURIComponent(req.params.address);
+    const sponsor = await getSponsor(address, ctx);
+    if (!sponsor) {
+      res.status(404).json({ error: "Sponsor not found", address, ...networkEnvelope(ctx) });
+      return;
+    }
+    const { ids, total } = await listEventIds({
+      ...ctx,
+      sponsor: sponsor.sponsorContract,
+      limit: 1_000_000,
+      offset: 0,
+    });
+    const events = (await getEventsByIds(ids, ctx)).map((event) => publicEvent(event, false));
+    res.json({
+      ...networkEnvelope(ctx),
+      sponsor,
+      events,
+      total,
+    });
   } catch (error) {
     next(error);
   }

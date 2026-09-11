@@ -1,8 +1,9 @@
 import { config } from "./config.js";
 import { decodePrintHex } from "./decoder.js";
 import { fetchNewLogs } from "./hiro.js";
-import { areEventIdsKnown, listEventIds, listPots, saveEvents, setSyncState } from "./cache.js";
+import { areEventIdsKnown, listEventIds, listPots, listSponsors, saveEvents, setSyncState } from "./cache.js";
 import { isPotContractId } from "./pots.js";
+import { isSponsorContractId } from "./sponsors.js";
 
 export function toCachedEvent(log) {
   const decoded = decodePrintHex(log.hex);
@@ -58,14 +59,31 @@ export async function runSync({ full = false, network, contract } = {}) {
   mode = stackspots.mode;
 
   const pots = await listPots(ctx);
+  const synced = new Set([ctx.contract]);
   for (const pot of pots) {
     const contractId = pot.potAddress;
-    if (!isPotContractId(contractId) || contractId === ctx.contract) continue;
+    if (!isPotContractId(contractId) || synced.has(contractId)) continue;
     try {
       const extra = await syncContract(contractId, ctx, { full });
       fetched += extra.fetched;
       stored += extra.stored;
       if (extra.mode) mode = extra.mode;
+      synced.add(contractId);
+    } catch (error) {
+      console.error(`[sync] ${ctx.network} ${contractId}`, error.message);
+    }
+  }
+
+  const sponsors = await listSponsors(ctx);
+  for (const sponsor of sponsors) {
+    const contractId = sponsor.sponsorContract;
+    if (!isSponsorContractId(contractId) || synced.has(contractId)) continue;
+    try {
+      const extra = await syncContract(contractId, ctx, { full });
+      fetched += extra.fetched;
+      stored += extra.stored;
+      if (extra.mode) mode = extra.mode;
+      synced.add(contractId);
     } catch (error) {
       console.error(`[sync] ${ctx.network} ${contractId}`, error.message);
     }
