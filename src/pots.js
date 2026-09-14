@@ -1,3 +1,5 @@
+import { eventPrint, eventTxId } from "./catalog.js";
+
 export const POT_STATUSES = ["deployed", "joinable", "started", "cancelled", "claimed"];
 
 export const PLATFORM_EVENTS = new Set([
@@ -53,6 +55,27 @@ export function isPotContractId(value) {
   );
 }
 
+/** Platform helpers that print or deploy beside pots but are not pot contracts. */
+const NON_POT_CONTRACT_NAMES = new Set([
+  "stackspots",
+  "stackspot-vrf",
+  "stackspot-sponsor",
+  "stackspot-sponsor-trait",
+  "stackspot-pots-trait",
+  "nft-trait",
+  "init-admin",
+  "sbtc-token",
+  "sbtc-registry",
+]);
+
+export function isLikelyPotContract(value) {
+  if (!isPotContractId(value)) return false;
+  const name = String(value).split(".")[1]?.toLowerCase() ?? "";
+  if (NON_POT_CONTRACT_NAMES.has(name)) return false;
+  if (name.includes("trait")) return false;
+  return true;
+}
+
 function firstContractId(...candidates) {
   for (const value of candidates) {
     if (isPotContractId(value)) return value;
@@ -88,7 +111,8 @@ export function potAddressFromValues(eventName, values) {
 }
 
 export function resolvePotAddress(event, stackspotsContract) {
-  const fromValues = potAddressFromValues(event?.event, event?.values);
+  const print = eventPrint(event);
+  const fromValues = potAddressFromValues(event?.event ?? print.event, print);
   if (fromValues) return fromValues;
   const contractId = event?.contractId;
   if (contractId && contractId !== stackspotsContract && isPotContractId(contractId)) {
@@ -105,6 +129,24 @@ export function statusFlags(status) {
     cancelled: status === "cancelled",
     claimed: status === "claimed",
   };
+}
+
+/** Print `event` key currently stored on a pot row (`lastEvent` or values.event). */
+export function potEventKey(pot) {
+  const fromLast = String(pot?.lastEvent ?? "").trim();
+  if (fromLast) return fromLast;
+  const fromValues = pot?.values && typeof pot.values === "object" ? pot.values.event : null;
+  return String(fromValues ?? "").trim();
+}
+
+/** Public /pots list: initialized pots only (`init-pot`). */
+export function isInitPotRow(pot) {
+  return potEventKey(pot) === "init-pot";
+}
+
+/** Owner listing: a stored `pre-init` print from the core contract, not a bare deploy. */
+export function isPreInitPotRow(pot) {
+  return potEventKey(pot) === "pre-init";
 }
 
 function pickText(...candidates) {
@@ -124,8 +166,8 @@ function pickStatus(existingStatus, incomingStatus, existingHeight, incomingHeig
 }
 
 function identityFromEvent(event) {
-  const values = event.values && typeof event.values === "object" ? event.values : {};
-  const eventName = event.event;
+  const values = eventPrint(event);
+  const eventName = event.event ?? values.event;
   return {
     potId: pickText(values["pot-id"], values["token-id"]),
     potName: pickText(values["pot-name"], values["contract-name"], values.name),
@@ -151,28 +193,59 @@ function emptyPot(potAddress) {
     lastEvent: null,
     lastTxId: null,
     lastBlockHeight: null,
+    sortScore: 0,
   };
 }
 
+function eventRecency(event) {
+  const print = eventPrint(event);
+  return Number(
+    event?.blockHeight ??
+      event?.burnBlockHeight ??
+      print["stacks-block-height"] ??
+      print["burn-block-height"] ??
+      event?.sortScore ??
+      0,
+  );
+}
+
+function potRecency(pot) {
+  return Number(pot?.sortScore ?? pot?.lastBlockHeight ?? 0);
+}
+
 export function applyEventToPot(existing, event, stackspotsContract) {
-  const eventName = event?.event;
+  const print = eventPrint(event);
+  const eventName = event?.event ?? print.event;
   if (!isPotEvent(eventName) || PLATFORM_EVENTS.has(eventName)) return existing ?? null;
 
   const potAddress = resolvePotAddress(event, stackspotsContract);
   if (!potAddress) return existing ?? null;
 
-  const values = event.values && typeof event.values === "object" ? event.values : {};
+  const values = { ...print };
+  if (values["min-amount"] != null && values["pot-min-amount"] == null) {
+    values["pot-min-amount"] = values["min-amount"];
+  }
+  if (values["max-participants"] != null && values["pot-max-participants"] == null) {
+    values["pot-max-participants"] = values["max-participants"];
+  }
+  if (values.cycles != null && values["pot-cycles"] == null) {
+    values["pot-cycles"] = values.cycles;
+  }
+  if (values.type != null && values["pot-type"] == null) {
+    values["pot-type"] = values.type;
+  }
   const incomingStatus = EVENT_STATUS[eventName];
   const base = existing && existing.potAddress === potAddress ? existing : emptyPot(potAddress);
   const identity = identityFromEvent(event);
+  const incomingRecency = eventRecency(event);
   const status = pickStatus(
     base.status,
     incomingStatus,
-    base.lastBlockHeight,
-    event.blockHeight,
+    potRecency(base),
+    incomingRecency,
   );
-  const incomingIsNewer =
-    Number(event.blockHeight ?? 0) >= Number(base.lastBlockHeight ?? 0);
+  const incomingIsNewer = incomingRecency >= potRecency(base);
+  const sortScore = Math.max(potRecency(base), incomingRecency);
 
   return {
     ...base,
@@ -187,8 +260,11 @@ export function applyEventToPot(existing, event, stackspotsContract) {
     ...statusFlags(status),
     values: { ...(base.values ?? {}), ...values },
     lastEvent: incomingIsNewer ? eventName : base.lastEvent,
-    lastTxId: incomingIsNewer ? (event.txId ?? base.lastTxId) : base.lastTxId,
-    lastBlockHeight: incomingIsNewer ? (event.blockHeight ?? base.lastBlockHeight) : base.lastBlockHeight,
+    lastTxId: incomingIsNewer ? (eventTxId(event) ?? base.lastTxId) : base.lastTxId,
+    lastBlockHeight: incomingIsNewer
+      ? (event.blockHeight ?? event.burnBlockHeight ?? base.lastBlockHeight)
+      : base.lastBlockHeight,
+    sortScore,
   };
 }
 
@@ -202,11 +278,10 @@ export function mergePotRecord(existing, incoming) {
   const status = pickStatus(
     existing.status,
     incoming.status,
-    existing.lastBlockHeight,
-    incoming.lastBlockHeight,
+    potRecency(existing),
+    potRecency(incoming),
   );
-  const incomingIsNewer =
-    Number(incoming.lastBlockHeight ?? 0) >= Number(existing.lastBlockHeight ?? 0);
+  const incomingIsNewer = potRecency(incoming) >= potRecency(existing);
   return {
     ...existing,
     ...incoming,
@@ -224,6 +299,7 @@ export function mergePotRecord(existing, incoming) {
     lastBlockHeight: incomingIsNewer
       ? incoming.lastBlockHeight
       : existing.lastBlockHeight,
+    sortScore: Math.max(potRecency(existing), potRecency(incoming)),
   };
 }
 
@@ -238,7 +314,7 @@ export function normalizeListedPot(pot) {
 }
 
 export function activityDedupeKey(event) {
-  const values = event?.values && typeof event.values === "object" ? event.values : {};
+  const values = eventPrint(event);
   const actor = values.participant ?? values.sponsor ?? values["claimer-address"] ?? "";
-  return `${event?.txId ?? ""}:${event?.event ?? ""}:${actor}`;
+  return `${eventTxId(event) ?? ""}:${event?.event ?? values.event ?? ""}:${actor}`;
 }

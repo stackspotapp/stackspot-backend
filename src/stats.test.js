@@ -129,7 +129,7 @@ test("organises pots and stats from every contract event key", () => {
         },
       },
       {
-        event: "sponsor event",
+        event: "sponsor-event",
         txId: "0x22",
         contractId: "ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.stackspot-sponsor",
         blockHeight: 4,

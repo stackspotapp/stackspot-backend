@@ -4,10 +4,9 @@ Node backend that fetches Stackspots contract print logs from the Hiro API, full
 
 ## What it returns
 
-Each event includes:
+Each event is only the fields decoded from that print’s hex buffer, plus `txid`. Redis stores that same object and nothing else — not the original hex, repr, clarity tree, block height, event index, or contract id. The same shape is used for every known event type (platform, pot, and sponsor).
 
-- `values` — unwrapped JSON. `uint`/`int` are **strings**, `optional none` is `null`, principals are strings (`ST…` or `ST….contract`), buffers are `0x…` hex, tuples are objects, lists are arrays.
-- `clarity` — the same tree with `{ type, value }` so the UI knows a field is `uint` vs `principal` vs `buff`.
+`uint`/`int` are **strings**, `optional none` is `null`, principals are strings (`ST…` or `ST….contract`), buffers are `0x…` hex, tuples are objects, lists are arrays.
 
 Print wrappers from Clarity are peeled before that:
 
@@ -64,12 +63,12 @@ The `npm warn config production Use --omit=dev instead` line from the host is ha
 | --- | --- | --- |
 | `GET` | `/health` | Redis + last sync. `?network=mainnet\|testnet` selects contract + Hiro |
 | `GET` | `/catalog` | Known event names/fields |
-| `GET` | `/events` | `network`, `event`, `pot`, `sponsor`, `limit`, `offset`, `raw=1` |
-| `GET` | `/events/:id` | One event including raw hex |
+| `GET` | `/events` | `network`, `event`, `pot`, `sponsor`, `limit`, `offset`. Every known event type is print fields + `txid` |
+| `GET` | `/events/:id` | One event: print fields + `txid` |
 | `GET` | `/pots` | `network`, `status=deployed\|joinable\|started\|cancelled\|claimed` |
 | `GET`/`POST` | `/pots/details` | Live `get-pot-details` + extras. Query/body: `owner`, `contract` (`ADDRESS.NAME`), `sponsor` (`ADDRESS.NAME`), `refresh=1` |
-| `GET` | `/sponsors` | Derived sponsor contracts from `platform sponsor contract added`, `sponsor-platform`, and `sponsor event` |
-| `GET` | `/sponsors/:address` | One sponsor plus cached events (`address` is `sponsor-contract` or wallet) |
+| `GET` | `/sponsors` | Cached `sponsor-platform` prints (decoded fields + `txid`) |
+| `GET` | `/sponsors/:address` | That sponsor print plus cached events (`address` is `sponsor-contract` or wallet) |
 | `GET` | `/stats` | Same as pots, plus join/stake/claim totals (`/pots/stats` alias) |
 | `GET`/`POST` | `/contracts/:address/:name/:function` | Read-only call on that contract |
 | `GET`/`POST` | `/contracts/:address.name/:function` | Same, `ADDRESS.NAME` + function |
@@ -83,21 +82,11 @@ The `npm warn config production Use --omit=dev instead` line from the host is ha
 {
   "events": [
     {
-      "id": "0xabc…:0",
-      "txId": "0xabc…",
       "event": "join-pot",
-      "values": {
-        "event": "join-pot",
-        "participant": "ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM",
-        "amount": "25000000",
-        "index": "0"
-      },
-      "clarity": {
-        "type": "tuple",
-        "value": {
-          "amount": { "type": "uint", "value": "25000000" }
-        }
-      }
+      "participant": "ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM",
+      "amount": "25000000",
+      "index": "0",
+      "txid": "0xabc…"
     }
   ],
   "total": 1,
@@ -127,7 +116,7 @@ Every contract print with an `event` key is indexed. Platform prints (`admin add
 | `cancel-pot`, `fall-back-cancel` | cancelled |
 | `claim-pot-reward` | claimed |
 
-Status only moves forward. Sync pulls Stackspots first, then each known pot contract, then each known sponsor contract, so pot-only prints (`init-pot`, `start-stackspot-*`, `stake-treasury`, …) and sponsor-only prints (`sponsor event`) are included. Join/claim/`sponsor-platform` prints that appear on both a child contract and Stackspots are counted once.
+Status only moves forward. Sync pulls Stackspots first, then each known pot contract, then each known sponsor contract, so pot-only prints (`init-pot`, `start-stackspot-*`, `stake-treasury`, …) and sponsor-only prints (`sponsor-event`) are included. Join/claim/`sponsor-platform` prints that appear on both a child contract and Stackspots are counted once.
 
 Sponsor prints:
 
@@ -135,15 +124,15 @@ Sponsor prints:
 | --- | --- | --- |
 | `platform sponsor contract added` | stackspots | `/sponsors` allowlist + `/events` |
 | `sponsor-platform` | stackspot-sponsor + stackspots `log-sponsor-platform` | `/sponsors` lock + `/events?event=sponsor-platform` |
-| `sponsor event` | stackspot-sponsor only (`log-sponsor-event`) | `/sponsors` tickets + `/events?event=sponsor%20event` or `?sponsor=` |
+| `sponsor-event` | stackspot-sponsor only (`log-sponsor-event`) | `/sponsors` tickets + `/events?event=sponsor-event` or `?sponsor=` |
 
 `GET /pots/details` is the profile / pot-profile read. Pass any combination of:
 
 - `owner` — Stacks principal. Used as `sender` for `get-pot-details` (`is-joined` is sender-specific) and to filter cached pots by pot-owner / pot-admin / deployer.
 - `contract` — pot `ADDRESS.NAME`. Loads that pot even if it is not in the Redis registry yet.
-- `sponsor` — platform sponsor `ADDRESS.NAME`. Filters to pots that bound that contract at init (or have a cached `sponsor event` ticket) and includes `get-platform-sponsor-ticket`.
+- `sponsor` — platform sponsor `ADDRESS.NAME`. Filters to pots that bound that contract at init (or have a cached `sponsor-event` ticket) and includes `get-platform-sponsor-ticket`.
 
-Each pot row includes the cached registry record, live `get-pot-details` (`values` + `clarity`), extras (`get-pot-is-init`, `get-pot-id`, `get-pot-cycle`, `get-pot-name`, min/max, sequential session fields), and `is-contract-allowed-hash` from Stackspots. Results are Redis-cached like `/contracts` (`CONTRACT_CACHE_TTL_SECONDS`). Cap is `POT_DETAILS_MAX` (default 40).
+Each pot row is only the decoded read-only result: `get-pot-details` fields, plus scalar reads (`pot-is-init`, `pot-id`, `pot-cycle`, `pot-name`, `pot-min-amount`, `pot-max-participants`, and `is-contract-allowed-hash`). Contract id, owner, sender, function name, args, and the empty pot shell are not part of the result hex and are not returned. Cap is `POT_DETAILS_MAX` (default 40).
 
 ```http
 GET /pots/details?network=testnet&owner=ST1…&contract=ST1….jackpot&sponsor=ST1….stackspot-sponsor
@@ -164,6 +153,6 @@ Content-Type: application/json
 { "sender": "ST1…", "args": ["ST1…"] }
 ```
 
-The response uses the same Clarity decoding as events: `values` (unwrapped) and `clarity` (typed). `(ok …)` is unwrapped into `ok: true` plus the inner tuple; `(err …)` is `ok: false` with the error value.
+The response uses the same Clarity decoding as events: `values` (unwrapped print/result fields). `(ok …)` is unwrapped into `ok: true` plus the inner tuple; `(err …)` is `ok: false` with the error value.
 
 `GET /stats` (or `GET /pots/stats`) uses those same status buckets (`byStatus` / `totals.deployed|joinable|started|cancelled|claimed`). It also rolls up unique participants/sponsors, STX joined/sponsored, deploy fees, STX staked, sBTC yield claimed, and Fastpool `paid` amounts. Dual pot+Stackspots prints of the same action are not double-counted. Amounts stay strings. Pass `?refresh=1` to recompute.

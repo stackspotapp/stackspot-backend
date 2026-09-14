@@ -2,6 +2,9 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   applyEventToPot,
+  isInitPotRow,
+  isLikelyPotContract,
+  isPreInitPotRow,
   mergePotRecord,
   normalizeListedPot,
   potAddressFromValues,
@@ -10,6 +13,14 @@ import {
 
 const POT = "ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.jackpot";
 const STACKSPOTS = "ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.stackspots";
+
+test("init-pot and pre-init row helpers", () => {
+  assert.equal(isInitPotRow({ lastEvent: "init-pot" }), true);
+  assert.equal(isInitPotRow({ lastEvent: "pre-init" }), false);
+  assert.equal(isPreInitPotRow({ lastEvent: "pre-init" }), true);
+  assert.equal(isPreInitPotRow({ lastEvent: "init-pot" }), false);
+  assert.equal(isPreInitPotRow({ status: "deployed", values: {} }), false);
+});
 
 test("pre-init uses pot-contract and marks deployed", () => {
   const record = potRecordFromEvent({
@@ -158,4 +169,12 @@ test("normalizeListedPot infers status from lastEvent", () => {
   assert.equal(normalizeListedPot({ potAddress: POT, lastEvent: "pre-init" }).status, "deployed");
   assert.equal(normalizeListedPot({ potAddress: POT, lastEvent: "claim-pot-reward" }).status, "claimed");
   assert.equal(normalizeListedPot({ potAddress: POT, lastEvent: "admin added/updated" }), null);
+});
+
+test("isLikelyPotContract skips platform helpers and keeps pot deploys", () => {
+  assert.equal(isLikelyPotContract(POT), true);
+  assert.equal(isLikelyPotContract("ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.sequential"), true);
+  assert.equal(isLikelyPotContract("ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.stackspots"), false);
+  assert.equal(isLikelyPotContract("ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.stackspot-sponsor"), false);
+  assert.equal(isLikelyPotContract("ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.nft-trait"), false);
 });

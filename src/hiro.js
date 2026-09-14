@@ -15,6 +15,14 @@ export function eventId(log) {
   return `${log.txId}:${log.eventIndex}`;
 }
 
+/** Hiro v2 log cursors look like `blockHeight:microblock:txIndex:eventIndex`. */
+export function blockHeightFromCursor(cursor) {
+  if (cursor == null || cursor === "") return null;
+  const head = String(cursor).split(":")[0];
+  const n = Number(head);
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
 export function normalizeLog(item, fallbackContractId = config.stackspotsContract) {
   const log = item.contract_log ?? item.log ?? item;
   const value = log.value ?? item.value ?? {};
@@ -39,10 +47,12 @@ export function normalizeLog(item, fallbackContractId = config.stackspotsContrac
     repr: value.repr ?? log.repr ?? null,
     topic: log.topic ?? item.topic ?? "print",
     contractId: log.contract_id ?? item.contract_id ?? fallbackContractId,
+    sortScore: asNumber(item.sortScore ?? log.sortScore),
   };
 }
 
 async function fetchJson(url, options = {}) {
+  const timeoutMs = Number(options.timeoutMs ?? process.env.HIRO_TIMEOUT_MS ?? 10_000);
   const res = await fetch(url, {
     method: options.method ?? "GET",
     headers: {
@@ -50,6 +60,7 @@ async function fetchJson(url, options = {}) {
       ...(options.body ? { "Content-Type": "application/json" } : {}),
     },
     body: options.body ? JSON.stringify(options.body) : undefined,
+    signal: AbortSignal.timeout(timeoutMs),
   });
   if (!res.ok) {
     const body = await res.text().catch(() => "");
@@ -95,9 +106,18 @@ export async function fetchContractLogsPage({
 
   try {
     const body = await fetchJson(v2Url);
+    const floor = blockHeightFromCursor(extractNextCursor(body));
+    const rawResults = extractResults(body);
     return {
       mode: "v2",
-      results: extractResults(body).map((item) => normalizeLog(item, contractId)),
+      // Hiro omits block_height on v2 log rows; approximate from page cursor so newest-first order is preserved.
+      results: rawResults.map((item, i) => {
+        const normalized = normalizeLog(item, contractId);
+        if (normalized.blockHeight == null && floor != null) {
+          normalized.blockHeight = floor + (rawResults.length - 1 - i);
+        }
+        return normalized;
+      }),
       nextCursor: extractNextCursor(body),
       offset: asNumber(body.offset, offset),
       total: asNumber(body.total),
@@ -136,6 +156,9 @@ export async function fetchNewLogs({
   let cursor = null;
   let offset = 0;
   let mode = null;
+  let truncated = false;
+  // Hiro pages are newest-first; descending sortScore keeps that order in Redis (latest → oldest).
+  let sortScore = Date.now() * 1000;
 
   for (let page = 0; page < maxPages; page += 1) {
     const batch = await fetchContractLogsPage({
@@ -153,12 +176,13 @@ export async function fetchNewLogs({
     let unknownOnPage = 0;
     batch.results.forEach((log, i) => {
       if (known[i]) return;
-      collected.push(log);
+      collected.push({ ...log, sortScore: sortScore-- });
       unknownOnPage += 1;
     });
 
     if (unknownOnPage === 0) break;
     if (!batch.nextCursor) break;
+    if (page === maxPages - 1) truncated = true;
 
     if (batch.mode === "v1") {
       offset = Number(batch.nextCursor);
@@ -169,7 +193,7 @@ export async function fetchNewLogs({
     }
   }
 
-  return { logs: collected, mode };
+  return { logs: collected, mode, truncated };
 }
 
 export function parseFunctionName(name) {
@@ -230,6 +254,38 @@ export async function fetchAddressBalances(address, apiUrl, { unanchored = true 
     apiUrl,
     `/extended/v1/address/${encodeURIComponent(address)}/balances?${query}`,
   );
+}
+
+export function deployedContractsFromAddressTxs(results) {
+  const ids = [];
+  for (const item of results ?? []) {
+    const tx = item?.tx ?? item;
+    if (tx?.tx_type !== "smart_contract" || tx?.tx_status !== "success") continue;
+    const id = tx.smart_contract?.contract_id;
+    if (typeof id === "string" && id.includes(".")) ids.push(id);
+  }
+  return [...new Set(ids)];
+}
+
+/** Successful `smart_contract` deploys from this wallet (newest first). */
+export async function fetchAddressDeployedContracts(address, { apiUrl, maxPages = 8 } = {}) {
+  const principal = String(address ?? "").trim().split(".")[0];
+  if (!principal) return [];
+
+  const collected = [];
+  let cursor = null;
+  for (let page = 0; page < maxPages; page += 1) {
+    const query = new URLSearchParams({ limit: "50" });
+    if (cursor) query.set("cursor", String(cursor));
+    const body = await fetchJson(
+      `${String(apiUrl).replace(/\/$/, "")}/extended/v2/addresses/${encodeURIComponent(principal)}/transactions?${query}`,
+    );
+    const results = extractResults(body);
+    collected.push(...deployedContractsFromAddressTxs(results));
+    cursor = extractNextCursor(body);
+    if (!cursor || results.length === 0) break;
+  }
+  return [...new Set(collected)];
 }
 
 export function parseContractId(address, name) {

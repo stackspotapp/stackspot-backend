@@ -1,3 +1,4 @@
+import { eventPrint } from "./catalog.js";
 import {
   activityDedupeKey,
   applyEventToPot,
@@ -64,12 +65,9 @@ export function computeStatistics(events = [], listedPots = [], { stackspotsCont
   });
 
   for (const event of sorted) {
-    const name = event.event ?? "unknown";
+    const values = eventPrint(event);
+    const name = event.event ?? values.event ?? "unknown";
     byEvent[name] = (byEvent[name] ?? 0) + 1;
-    const values =
-      event.values && typeof event.values === "object" && !Array.isArray(event.values)
-        ? event.values
-        : {};
 
     if (isPotEvent(name)) {
       const updated = applyEventToPot(potsMap.get(resolvePotAddress(event, stackspotsContract)), event, stackspotsContract);
@@ -146,7 +144,7 @@ export function computeStatistics(events = [], listedPots = [], { stackspotsCont
       if (values.sponsor) platformSponsors.add(values.sponsor);
       if (values["sponsor-contract"]) platformSponsorContracts.add(values["sponsor-contract"]);
     }
-    if (name === "sponsor event" && unique) {
+    if (name === "sponsor-event" && unique) {
       sponsorEventCount += 1;
     }
   }

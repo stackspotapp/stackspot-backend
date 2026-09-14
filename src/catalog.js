@@ -1,3 +1,6 @@
+import { createHash } from "node:crypto";
+import { expandEncodedValues } from "./decoder.js";
+
 /**
  * Print events from stackspots.clar and the pot templates.
  * Status is derived from the event key (see EVENT_STATUS in pots.js).
@@ -53,6 +56,7 @@ export const STACKSPOTS_EVENTS = {
       "min-amount",
       "max-participants",
       "pot-is-init",
+      "sponsors",
     ],
   },
   "pot-registered": {
@@ -243,9 +247,101 @@ export const STACKSPOTS_EVENTS = {
       "burn-block-height",
     ],
   },
-  "sponsor event": {
+  "sponsor-event": {
     source: "sponsor",
     kind: "sponsor",
     fields: ["event", "ticket-id", "pot-contract", "pot-details"],
   },
 };
+
+export function isStackspotsLogType(eventName) {
+  return Boolean(eventName) && Object.prototype.hasOwnProperty.call(STACKSPOTS_EVENTS, eventName);
+}
+
+/** Keep only the catalog fields decoded from the print buffer. */
+export function pickLoggedValues(eventName, values) {
+  const spec = STACKSPOTS_EVENTS[eventName];
+  if (!spec) return null;
+  const source = values && typeof values === "object" && !Array.isArray(values) ? values : {};
+  const picked = { event: eventName };
+  for (const field of spec.fields) {
+    if (field === "event") continue;
+    if (source[field] !== undefined) picked[field] = source[field];
+  }
+  return picked;
+}
+
+/** Print fields, whether the row is still nested (`values`) or already the stored shape. */
+export function eventPrint(event) {
+  if (!event || typeof event !== "object") return {};
+  const nested = event.values;
+  const source =
+    nested && typeof nested === "object" && !Array.isArray(nested) ? nested : event;
+  if (!source || typeof source !== "object") return {};
+  const { txid, txId, ...fields } = source;
+  return fields;
+}
+
+export function eventTxId(event) {
+  if (!event || typeof event !== "object") return null;
+  return event.txId ?? event.txid ?? null;
+}
+
+/** Cached and returned event: every field decoded from the print, plus txid. No hex or log metadata. */
+const PUBLIC_EVENT_META = new Set([
+  "id",
+  "txId",
+  "txid",
+  "eventIndex",
+  "contractId",
+  "blockHeight",
+  "burnBlockHeight",
+  "hex",
+  "repr",
+  "clarity",
+  "values",
+  "eventType",
+  "topic",
+  "sortScore",
+  "decodeError",
+  "sourceContract",
+]);
+
+export function toPublicEvent(event) {
+  if (!event) return null;
+  const source = expandEncodedValues(eventPrint(event));
+  const name = String(source.event ?? event.event ?? "").trim();
+  if (!isStackspotsLogType(name)) return null;
+  const txid = eventTxId(event);
+  if (!txid) return null;
+  const fields = { event: name };
+  for (const [key, value] of Object.entries(source)) {
+    if (PUBLIC_EVENT_META.has(key) || value === undefined) continue;
+    fields[key] = value;
+  }
+  return { ...fields, txid };
+}
+
+function stableStringify(value) {
+  if (Array.isArray(value)) return `[${value.map((item) => stableStringify(item)).join(",")}]`;
+  if (value && typeof value === "object") {
+    return `{${Object.keys(value)
+      .sort()
+      .map((key) => `${JSON.stringify(key)}:${stableStringify(value[key])}`)
+      .join(",")}}`;
+  }
+  return JSON.stringify(value) ?? "null";
+}
+
+/**
+ * One Redis row for the same print. The sponsor contract and stackspots both
+ * emit the same payload in one tx, so event index is not a unique key.
+ */
+export function eventDedupeId(payload) {
+  const txid = payload?.txid;
+  const name = payload?.event;
+  if (!txid || !name) return null;
+  const { txid: _txid, ...fields } = payload;
+  const hash = createHash("sha256").update(stableStringify(fields)).digest("hex").slice(0, 16);
+  return `${txid}:${name}:${hash}`;
+}

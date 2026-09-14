@@ -168,6 +168,27 @@ export function decodePrintHex(hex) {
   return { event, values, clarity };
 }
 
+/** Decode nested consensus buffers (such as `pot-values`) so stored prints are never left as hex. */
+export function expandEncodedValues(value, depth = 0) {
+  if (depth > 8 || value == null) return value;
+  if (typeof value === "string" && /^0x[0-9a-fA-F]{8,}$/.test(value)) {
+    const decoded = decodePrintHex(value);
+    if (decoded.values && typeof decoded.values === "object") {
+      return expandEncodedValues(decoded.values, depth + 1);
+    }
+    return value;
+  }
+  if (Array.isArray(value)) return value.map((item) => expandEncodedValues(item, depth + 1));
+  if (typeof value === "object") {
+    const next = {};
+    for (const [key, item] of Object.entries(value)) {
+      next[key] = expandEncodedValues(item, depth + 1);
+    }
+    return next;
+  }
+  return value;
+}
+
 export function decodeClarityResult(hex) {
   if (!hex) {
     return { ok: false, values: null, clarity: null, decodeError: "Missing Clarity result hex" };
