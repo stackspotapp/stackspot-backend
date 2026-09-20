@@ -2,6 +2,7 @@ import { eventPrint } from "./catalog.js";
 import {
   activityDedupeKey,
   applyEventToPot,
+  EVENT_STATUS,
   isPotEvent,
   normalizeListedPot,
   PLATFORM_EVENTS,
@@ -9,6 +10,17 @@ import {
   resolvePotAddress,
 } from "./pots.js";
 
+const STARTED_EVENT_NAMES = Object.entries(EVENT_STATUS)
+  .filter(([, status]) => status === "started")
+  .map(([name]) => name);
+
+/** True if the pot ever reached started (including later claimed; cancel-only pots excluded). */
+function potEverStarted(pot) {
+  if (!pot) return false;
+  if (pot.status === "started" || pot.status === "claimed") return true;
+  const byEvent = pot.byEvent ?? {};
+  return STARTED_EVENT_NAMES.some((name) => (byEvent[name] ?? 0) > 0);
+}
 function asBig(value) {
   if (value == null || value === "") return 0n;
   try {
@@ -16,6 +28,18 @@ function asBig(value) {
   } catch {
     return 0n;
   }
+}
+
+/** Prefer full yield; reconstruct from 2% starter/claimer slices when the field was truncated. */
+function claimYieldAmount(values = {}) {
+  const direct = asBig(values["pot-yield-amount"] ?? values.potYieldAmount ?? values["pot-reward-amount"]);
+  if (direct > 0n) return direct;
+  const starter = asBig(values["starter-reward-amount"] ?? values["starter-reward"]);
+  const claimer = asBig(values["claimer-reward-amount"] ?? values["claimer-reward"]);
+  if (starter > 0n && claimer > 0n) return (starter + claimer) * 25n;
+  if (starter > 0n) return starter * 50n;
+  if (claimer > 0n) return claimer * 50n;
+  return 0n;
 }
 
 function emptyAgg() {
@@ -57,6 +81,8 @@ export function computeStatistics(events = [], listedPots = [], { stackspotsCont
   let deployFees = 0n;
   let staked = 0n;
   let rewardsPaid = 0n;
+  /** Max claim yield per pot — pot + stackspots prints share a tx and must not double-count. */
+  const yieldByPot = new Map();
 
   const sorted = [...events].sort((a, b) => {
     const height = Number(a.blockHeight ?? 0) - Number(b.blockHeight ?? 0);
@@ -106,11 +132,13 @@ export function computeStatistics(events = [], listedPots = [], { stackspotsCont
         aggByPot.set(potAddress, agg);
       }
     }
-    if (name === "claim-pot-reward" && unique) {
-      yieldClaimed += asBig(values["pot-yield-amount"]);
-      if (potAddress) {
+    if (name === "claim-pot-reward") {
+      const amount = claimYieldAmount(values);
+      if (potAddress && amount > 0n) {
+        const prev = yieldByPot.get(potAddress) ?? 0n;
+        if (amount > prev) yieldByPot.set(potAddress, amount);
         const agg = aggByPot.get(potAddress) ?? emptyAgg();
-        agg.yieldClaimed += asBig(values["pot-yield-amount"]);
+        if (amount > agg.yieldClaimed) agg.yieldClaimed = amount;
         aggByPot.set(potAddress, agg);
       }
     }
@@ -175,7 +203,15 @@ export function computeStatistics(events = [], listedPots = [], { stackspotsCont
   for (const pot of pots) {
     const type = pot.potType ?? "unknown";
     byType[type] = (byType[type] ?? 0) + 1;
-    if (byStatus[pot.status] != null) byStatus[pot.status] += 1;
+    const status = POT_STATUSES.includes(pot.status) ? pot.status : null;
+    if (status) byStatus[status] += 1;
+  }
+
+  // Lifecycle "started" = ever started (claimed pots still count; cancel-without-start does not).
+  byStatus.started = pots.filter(potEverStarted).length;
+
+  for (const amount of yieldByPot.values()) {
+    yieldClaimed += amount;
   }
 
   return {

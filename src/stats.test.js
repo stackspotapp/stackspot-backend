@@ -143,7 +143,7 @@ test("organises pots and stats from every contract event key", () => {
   assert.equal(stats.totals.pots, 2);
   assert.equal(stats.totals.deployed, 0);
   assert.equal(stats.totals.joinable, 0);
-  assert.equal(stats.totals.started, 0);
+  assert.equal(stats.totals.started, 1);
   assert.equal(stats.totals.cancelled, 1);
   assert.equal(stats.totals.claimed, 1);
   assert.equal(stats.totals.participants, 1);
@@ -156,6 +156,7 @@ test("organises pots and stats from every contract event key", () => {
   assert.equal(stats.totals.staked, "30000000");
   assert.equal(stats.byType.jackpot, 1);
   assert.equal(stats.byType["crowd-fund"], 1);
+  assert.equal(stats.byStatus.started, 1);
   assert.equal(stats.byStatus.claimed, 1);
   assert.equal(stats.byStatus.cancelled, 1);
   assert.equal(stats.byEvent["join-pot"], 2);
@@ -177,4 +178,53 @@ test("organises pots and stats from every contract event key", () => {
   const crowd = stats.pots.find((pot) => pot.potAddress === OTHER);
   assert.equal(crowd.status, "cancelled");
   assert.equal(crowd.joinable, false);
+});
+
+test("claim yield uses max per pot and reconstructs from reward slices", () => {
+  const stats = computeStatistics(
+    [
+      {
+        event: "pre-init",
+        txId: "0xa",
+        blockHeight: 1,
+        values: { "pot-contract": POT, "pot-type": "jackpot" },
+      },
+      {
+        event: "claim-pot-reward",
+        txId: "0xf",
+        eventIndex: 0,
+        contractId: STACKSPOTS,
+        blockHeight: 20,
+        values: {
+          "pot-address": POT,
+          "claimer-address": USER,
+          "starter-reward-amount": "92",
+          "claimer-reward-amount": "92",
+        },
+      },
+      {
+        event: "claim-pot-reward",
+        txId: "0xf",
+        eventIndex: 1,
+        contractId: POT,
+        blockHeight: 20,
+        values: {
+          "pot-address": POT,
+          "claimer-address": USER,
+          "pot-yield-amount": "4645",
+          "starter-reward-amount": "92",
+          "claimer-reward-amount": "92",
+        },
+      },
+    ],
+    [],
+    { stackspotsContract: STACKSPOTS },
+  );
+
+  assert.equal(stats.totals.claimed, 1);
+  assert.equal(stats.totals.cancelled, 0);
+  assert.equal(stats.byStatus.cancelled, 0);
+  assert.equal(stats.totals.started, 1);
+  assert.equal(stats.byStatus.started, 1);
+  assert.equal(stats.totals.yieldClaimed, "4645");
 });
