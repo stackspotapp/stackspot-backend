@@ -21,6 +21,25 @@ function potEverStarted(pot) {
   const byEvent = pot.byEvent ?? {};
   return STARTED_EVENT_NAMES.some((name) => (byEvent[name] ?? 0) > 0);
 }
+
+function potLockedFromValues(pot) {
+  const values = pot?.values;
+  if (!values || typeof values !== "object") return false;
+  const locked = values["pot-locked"] ?? values.potLocked;
+  return locked === true || locked === "true" || locked === 1 || locked === "1";
+}
+
+/**
+ * Currently joinable: open for joins, not started/locked/cancelled/claimed.
+ * Uses event status + start prints + pot-locked flags (not burn-height join window).
+ */
+function potCurrentlyJoinable(pot) {
+  if (!pot) return false;
+  if (pot.status === "cancelled" || pot.status === "claimed" || pot.status === "started") return false;
+  if (potEverStarted(pot)) return false;
+  if (potLockedFromValues(pot)) return false;
+  return pot.status === "joinable";
+}
 function asBig(value) {
   if (value == null || value === "") return 0n;
   try {
@@ -209,6 +228,8 @@ export function computeStatistics(events = [], listedPots = [], { stackspotsCont
 
   // Lifecycle "started" = ever started (claimed pots still count; cancel-without-start does not).
   byStatus.started = pots.filter(potEverStarted).length;
+  // Joinable = currently open only (exclude started/locked even if status string lagged).
+  byStatus.joinable = pots.filter(potCurrentlyJoinable).length;
 
   for (const amount of yieldByPot.values()) {
     yieldClaimed += amount;

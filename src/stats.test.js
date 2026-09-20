@@ -228,3 +228,65 @@ test("claim yield uses max per pot and reconstructs from reward slices", () => {
   assert.equal(stats.byStatus.started, 1);
   assert.equal(stats.totals.yieldClaimed, "4645");
 });
+
+test("joinable excludes started/locked pots; started counts claimed", () => {
+  const JOINABLE = "ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.open-pot";
+  const LOCKED_LAG = "ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.lag-status";
+  const stats = computeStatistics(
+    [
+      {
+        event: "init-pot",
+        txId: "0x1",
+        blockHeight: 1,
+        values: { contract: JOINABLE, type: "jackpot" },
+      },
+      {
+        event: "init-pot",
+        txId: "0x2",
+        blockHeight: 2,
+        values: { contract: LOCKED_LAG, type: "jackpot" },
+      },
+      // Locked flag on a pot that still has joinable-ish history; start print marks it started.
+      {
+        event: "start-stackspot-jackpot",
+        txId: "0x3",
+        blockHeight: 3,
+        values: { "pot-contract": LOCKED_LAG, "pot-locked": true },
+      },
+      {
+        event: "init-pot",
+        txId: "0x4",
+        blockHeight: 4,
+        values: { contract: POT, type: "jackpot" },
+      },
+      {
+        event: "start-stackspot-jackpot",
+        txId: "0x5",
+        blockHeight: 5,
+        values: { "pot-contract": POT, "pot-locked": true },
+      },
+      {
+        event: "claim-pot-reward",
+        txId: "0x6",
+        blockHeight: 6,
+        values: { "pot-address": POT, "pot-yield-amount": "10" },
+      },
+      // Status string joinable but pot-locked in values (stale status row).
+      {
+        event: "init-pot",
+        txId: "0x7",
+        blockHeight: 7,
+        values: { contract: OTHER, type: "crowd-fund", "pot-locked": true },
+      },
+    ],
+    [],
+    { stackspotsContract: STACKSPOTS },
+  );
+
+  assert.equal(stats.totals.joinable, 1);
+  assert.equal(stats.byStatus.joinable, 1);
+  assert.equal(stats.totals.started, 2);
+  assert.equal(stats.byStatus.started, 2);
+  assert.equal(stats.totals.claimed, 1);
+  assert.equal(stats.pots.find((p) => p.potAddress === JOINABLE).status, "joinable");
+});
