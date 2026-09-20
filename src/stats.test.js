@@ -84,6 +84,12 @@ test("organises pots and stats from every contract event key", () => {
         values: { "pot-contract": OTHER, "pot-type": "crowd-fund", "pot-name": "Beta" },
       },
       {
+        event: "init-pot",
+        txId: "0x10b",
+        blockHeight: 13,
+        values: { contract: OTHER, type: "crowd-fund" },
+      },
+      {
         event: "cancel-pot",
         txId: "0x11",
         contractId: OTHER,
@@ -190,6 +196,12 @@ test("claim yield uses max per pot and reconstructs from reward slices", () => {
         values: { "pot-contract": POT, "pot-type": "jackpot" },
       },
       {
+        event: "init-pot",
+        txId: "0xb",
+        blockHeight: 2,
+        values: { contract: POT, type: "jackpot" },
+      },
+      {
         event: "claim-pot-reward",
         txId: "0xf",
         eventIndex: 0,
@@ -227,6 +239,46 @@ test("claim yield uses max per pot and reconstructs from reward slices", () => {
   assert.equal(stats.totals.started, 1);
   assert.equal(stats.byStatus.started, 1);
   assert.equal(stats.totals.yieldClaimed, "4645");
+});
+
+test("stats pot totals ignore pre-init-only deploys", () => {
+  const PRE_ONLY = "ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.pre-only";
+  const stats = computeStatistics(
+    [
+      {
+        event: "pre-init",
+        txId: "0xpre",
+        blockHeight: 1,
+        values: { "pot-contract": PRE_ONLY, "pot-type": "jackpot" },
+      },
+      {
+        event: "init-pot",
+        txId: "0xinit",
+        blockHeight: 2,
+        values: { contract: POT, type: "jackpot" },
+      },
+      {
+        event: "start-stackspot-jackpot",
+        txId: "0xstart",
+        blockHeight: 3,
+        values: { "pot-contract": POT, "pot-locked": true },
+      },
+      {
+        event: "init-pot",
+        txId: "0xopen",
+        blockHeight: 4,
+        values: { contract: OTHER, type: "crowd-fund" },
+      },
+    ],
+    [],
+    { stackspotsContract: STACKSPOTS },
+  );
+
+  assert.equal(stats.totals.pots, 2);
+  assert.equal(stats.totals.joinable, 1);
+  assert.equal(stats.totals.started, 1);
+  assert.equal(stats.totals.deployed, 0);
+  assert.ok(!stats.pots.some((p) => p.potAddress === PRE_ONLY));
 });
 
 test("joinable excludes started/locked pots; started counts claimed", () => {

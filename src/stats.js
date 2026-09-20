@@ -40,6 +40,15 @@ function potCurrentlyJoinable(pot) {
   if (potLockedFromValues(pot)) return false;
   return pot.status === "joinable";
 }
+
+/** Same universe as GET /pots: must have seen init-pot or pot-registered (not bare pre-init). */
+function potHasInitPrint(pot, initializedAddresses) {
+  if (!pot?.potAddress) return false;
+  const key = String(pot.potAddress).trim().toLowerCase();
+  if (initializedAddresses?.has(key)) return true;
+  const byEvent = pot.byEvent ?? {};
+  return (byEvent["init-pot"] ?? 0) > 0 || (byEvent["pot-registered"] ?? 0) > 0;
+}
 function asBig(value) {
   if (value == null || value === "") return 0n;
   try {
@@ -102,6 +111,8 @@ export function computeStatistics(events = [], listedPots = [], { stackspotsCont
   let rewardsPaid = 0n;
   /** Max claim yield per pot — pot + stackspots prints share a tx and must not double-count. */
   const yieldByPot = new Map();
+  /** Pot contracts that received init-pot or pot-registered (excludes pre-init-only deploys). */
+  const initializedAddresses = new Set();
 
   const sorted = [...events].sort((a, b) => {
     const height = Number(a.blockHeight ?? 0) - Number(b.blockHeight ?? 0);
@@ -123,6 +134,9 @@ export function computeStatistics(events = [], listedPots = [], { stackspotsCont
     if (unique) seenActivity.add(activityDedupeKey(event));
 
     const potAddress = resolvePotAddress(event, stackspotsContract);
+    if (potAddress && (name === "init-pot" || name === "pot-registered")) {
+      initializedAddresses.add(String(potAddress).trim().toLowerCase());
+    }
     if (potAddress && isPotEvent(name) && unique) {
       const agg = aggByPot.get(potAddress) ?? emptyAgg();
       agg.byEvent[name] = (agg.byEvent[name] ?? 0) + 1;
@@ -198,7 +212,7 @@ export function computeStatistics(events = [], listedPots = [], { stackspotsCont
 
   const byStatus = Object.fromEntries(POT_STATUSES.map((status) => [status, 0]));
   const byType = {};
-  const pots = [...potsMap.values()]
+  const allPots = [...potsMap.values()]
     .map((pot) => {
       const agg = aggByPot.get(pot.potAddress) ?? emptyAgg();
       return {
@@ -219,6 +233,9 @@ export function computeStatistics(events = [], listedPots = [], { stackspotsCont
     })
     .sort((a, b) => Number(b.lastBlockHeight ?? 0) - Number(a.lastBlockHeight ?? 0));
 
+  // Lifecycle + pot totals match GET /pots: initialized pots only (init-pot / pot-registered).
+  const pots = allPots.filter((pot) => potHasInitPrint(pot, initializedAddresses));
+
   for (const pot of pots) {
     const type = pot.potType ?? "unknown";
     byType[type] = (byType[type] ?? 0) + 1;
@@ -231,8 +248,11 @@ export function computeStatistics(events = [], listedPots = [], { stackspotsCont
   // Joinable = currently open only (exclude started/locked even if status string lagged).
   byStatus.joinable = pots.filter(potCurrentlyJoinable).length;
 
-  for (const amount of yieldByPot.values()) {
-    yieldClaimed += amount;
+  for (const [address, amount] of yieldByPot) {
+    const key = String(address).trim().toLowerCase();
+    if (!initializedAddresses.size || initializedAddresses.has(key)) {
+      yieldClaimed += amount;
+    }
   }
 
   return {
