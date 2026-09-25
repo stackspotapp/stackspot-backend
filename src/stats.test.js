@@ -337,8 +337,50 @@ test("joinable excludes started/locked pots; started counts claimed", () => {
 
   assert.equal(stats.totals.joinable, 1);
   assert.equal(stats.byStatus.joinable, 1);
-  assert.equal(stats.totals.started, 2);
-  assert.equal(stats.byStatus.started, 2);
+  assert.equal(stats.totals.started, 3);
+  assert.equal(stats.byStatus.started, 3);
   assert.equal(stats.totals.claimed, 1);
   assert.equal(stats.pots.find((p) => p.potAddress === JOINABLE).status, "joinable");
+});
+
+test("live pot-locked moves pot from joinable to started", () => {
+  const LOCKED = "ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.blaze";
+  const OPEN = "ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.open";
+  const stats = computeStatistics(
+    [
+      {
+        event: "init-pot",
+        txId: "0x1",
+        blockHeight: 1,
+        values: { contract: LOCKED, type: "sequential" },
+      },
+      {
+        event: "init-pot",
+        txId: "0x2",
+        blockHeight: 2,
+        values: { contract: OPEN, type: "jackpot" },
+      },
+    ],
+    [
+      {
+        potAddress: LOCKED,
+        status: "joinable",
+        lastEvent: "init-pot",
+        live: { "pot-locked": true, "pot-claimer-address": null },
+      },
+      {
+        potAddress: OPEN,
+        status: "joinable",
+        lastEvent: "init-pot",
+        live: { "pot-locked": false },
+      },
+    ],
+    { stackspotsContract: STACKSPOTS },
+  );
+
+  assert.equal(stats.totals.pots, 2);
+  assert.equal(stats.totals.joinable, 1);
+  assert.equal(stats.totals.started, 1);
+  assert.equal(stats.byStatus.joinable, 1);
+  assert.equal(stats.byStatus.started, 1);
 });

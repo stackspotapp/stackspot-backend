@@ -419,6 +419,23 @@ function readValue(row) {
   return { ok: true, value: row.values };
 }
 
+export function extractSponsorPoolConfig(values) {
+  const payload = values && typeof values === "object" ? values : {};
+  const direct = payload.values && typeof payload.values === "object" ? payload.values : payload;
+  const nested = direct && typeof direct === "object" && "pool-config" in direct
+    ? direct["pool-config"]
+    : direct && typeof direct === "object" && "poolConfig" in direct
+      ? direct.poolConfig
+      : direct;
+  const source = nested && typeof nested === "object" ? nested : {};
+  return {
+    "join-end": source["join-end"] ?? source.joinEnd ?? null,
+    "prepare-start": source["prepare-start"] ?? source.prepareStart ?? null,
+    "cycle-end": source["cycle-end"] ?? source.cycleEnd ?? null,
+    "reward-release": source["reward-release"] ?? source.rewardRelease ?? null,
+  };
+}
+
 /** Decoded read-only values only. Call metadata is not part of the result hex. */
 export function extractedPotDetails(details, extras = {}) {
   const out = {};
@@ -433,6 +450,36 @@ export function extractedPotDetails(details, extras = {}) {
     out[field] = read.value;
   }
   return out;
+}
+
+export async function loadSponsorPoolConfig({
+  sponsorContract,
+  burnHeight,
+  sender,
+  refresh = false,
+  ctx,
+}) {
+  if (!isSponsorContractId(sponsorContract)) {
+    return null;
+  }
+  const height = Number(burnHeight ?? 0);
+  const target = String(sponsorContract).trim();
+  const payload = await readCachedFunction({
+    contractId: target,
+    functionName: "get-pool-config",
+    sender: sender || walletOf(target),
+    args: [{ type: "uint", value: String(height || 0) }],
+    refresh,
+    ctx,
+  });
+  if (!payload || !payload.ok || !payload.values || typeof payload.values !== "object") {
+    return null;
+  }
+  const cfg = extractSponsorPoolConfig(payload);
+  if (!cfg || (!cfg["join-end"] && !cfg["prepare-start"] && !cfg["cycle-end"] && !cfg["reward-release"])) {
+    return null;
+  }
+  return cfg;
 }
 
 export async function loadLivePotDetails({

@@ -37,6 +37,7 @@ import {
   initPotPrintForPot,
   initPotPrintsForSponsor,
   loadLivePotDetails,
+  loadSponsorPoolConfig,
   parseOptionalContractId,
   sponsorsFromPrintLogs,
   parseOptionalPrincipal,
@@ -454,18 +455,29 @@ app.get("/sponsors", async (req, res, next) => {
     });
     const seenTx = new Set();
     const core = String(ctx.contract ?? "").trim().toLowerCase();
-    const sponsors = (await getEventsByIds(ids, ctx))
-      .map(withProjectName)
-      .filter((row) => {
-        const source = String(row?.sourceContract ?? "").trim().toLowerCase();
-        if (source && core && source !== core) return false;
-        const txid = row?.txid;
-        if (!txid || seenTx.has(txid)) return false;
-        seenTx.add(txid);
-        return true;
-      })
-      .map((row) => printPayload(row));
-    res.json({ ...networkEnvelope(ctx), sponsors, total: sponsors.length });
+    const events = await getEventsByIds(ids, ctx);
+    const sponsorRows = [];
+    for (const row of events.map(withProjectName).filter(Boolean)) {
+      const source = String(row?.sourceContract ?? "").trim().toLowerCase();
+      if (source && core && source !== core) continue;
+      const txid = row?.txid;
+      if (!txid || seenTx.has(txid)) continue;
+      seenTx.add(txid);
+      const sponsorContract =
+        row["sponsor-contract"] ?? row.sponsorContract ?? row["contract-address"] ?? row.contractAddress ?? null;
+      const sponsorPayload = printPayload(row);
+      const poolConfig = sponsorContract
+        ? await loadSponsorPoolConfig({
+            sponsorContract,
+            burnHeight: row["burn-block-height"] ?? row.burnBlockHeight ?? 0,
+            sender: row.sponsor ?? null,
+            refresh: false,
+            ctx,
+          })
+        : null;
+      sponsorRows.push(poolConfig ? { ...sponsorPayload, "pool-config": poolConfig, poolConfig } : sponsorPayload);
+    }
+    res.json({ ...networkEnvelope(ctx), sponsors: sponsorRows, total: sponsorRows.length });
   } catch (error) {
     next(error);
   }
@@ -530,9 +542,20 @@ app.get("/sponsors/:address", async (req, res, next) => {
       res.status(404).json({ error: "Sponsor not found", address, ...networkEnvelope(ctx) });
       return;
     }
+    const sponsorContract = sponsor?.["sponsor-contract"] ?? sponsor?.sponsorContract ?? address;
+    const poolConfig = sponsorContract
+      ? await loadSponsorPoolConfig({
+          sponsorContract,
+          burnHeight: sponsor?.["burn-block-height"] ?? sponsor?.burnBlockHeight ?? 0,
+          sender: sponsor?.sponsor ?? null,
+          refresh: false,
+          ctx,
+        })
+      : null;
+    const enrichedSponsor = poolConfig ? { ...sponsor, "pool-config": poolConfig, poolConfig } : sponsor;
     res.json({
       ...networkEnvelope(ctx),
-      sponsor,
+      sponsor: enrichedSponsor,
       events,
       total,
     });
@@ -572,7 +595,16 @@ async function statsHandler(req, res, next) {
     let stats = !refresh ? await getCachedStats(ctx) : null;
     if (!stats) {
       const [events, pots] = await Promise.all([listAllEvents(ctx), listPots(ctx)]);
-      stats = computeStatistics(events, pots, { stackspotsContract: ctx.contract });
+      const lives = await getPotLives(
+        pots.map((pot) => pot.potAddress).filter(Boolean),
+        ctx,
+      );
+      const potsWithLive = pots.map((pot) => {
+        const id = String(pot.potAddress ?? "").trim().toLowerCase();
+        const live = pot.live ?? (id ? lives.get(id) : null);
+        return live ? { ...pot, live } : pot;
+      });
+      stats = computeStatistics(events, potsWithLive, { stackspotsContract: ctx.contract });
       await setCachedStats(stats, ctx);
     }
     res.json({ ...networkEnvelope(ctx), ...stats });

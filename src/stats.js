@@ -14,31 +14,62 @@ const STARTED_EVENT_NAMES = Object.entries(EVENT_STATUS)
   .filter(([, status]) => status === "started")
   .map(([name]) => name);
 
+function potLiveValues(pot) {
+  if (pot?.live && typeof pot.live === "object" && !Array.isArray(pot.live)) return pot.live;
+  return null;
+}
+
+function truthyFlag(value) {
+  return value === true || value === "true" || value === 1 || value === "1";
+}
+
+function potHasClaimer(pot) {
+  if (pot?.status === "claimed") return true;
+  const live = potLiveValues(pot);
+  const values = pot?.values && typeof pot.values === "object" ? pot.values : null;
+  const claimer =
+    live?.["pot-claimer-address"] ??
+    live?.potClaimerAddress ??
+    values?.["pot-claimer-address"] ??
+    values?.potClaimerAddress;
+  return claimer != null && String(claimer).trim() !== "" && String(claimer) !== "none";
+}
+
+function potIsLocked(pot) {
+  const live = potLiveValues(pot);
+  const values = pot?.values && typeof pot.values === "object" ? pot.values : null;
+  if (live && truthyFlag(live["pot-locked"] ?? live.potLocked)) return true;
+  if (values && truthyFlag(values["pot-locked"] ?? values.potLocked)) return true;
+  return false;
+}
+
 /** True if the pot ever reached started (including later claimed; cancel-only pots excluded). */
 function potEverStarted(pot) {
   if (!pot) return false;
   if (pot.status === "started" || pot.status === "claimed") return true;
+  if (potHasClaimer(pot)) return true;
+  // Live get-pot-details lock — same signal the pots page uses for "started".
+  if (potIsLocked(pot)) return true;
   const byEvent = pot.byEvent ?? {};
   return STARTED_EVENT_NAMES.some((name) => (byEvent[name] ?? 0) > 0);
 }
 
-function potLockedFromValues(pot) {
-  const values = pot?.values;
-  if (!values || typeof values !== "object") return false;
-  const locked = values["pot-locked"] ?? values.potLocked;
-  return locked === true || locked === "true" || locked === 1 || locked === "1";
-}
-
 /**
  * Currently joinable: open for joins, not started/locked/cancelled/claimed.
- * Uses event status + start prints + pot-locked flags (not burn-height join window).
+ * Aligns with pots UI (`!potLocked` + not claimed).
  */
 function potCurrentlyJoinable(pot) {
   if (!pot) return false;
-  if (pot.status === "cancelled" || pot.status === "claimed" || pot.status === "started") return false;
+  if (pot.status === "cancelled") return false;
+  if (potHasClaimer(pot)) return false;
+  if (pot.status === "claimed" || pot.status === "started") return false;
   if (potEverStarted(pot)) return false;
-  if (potLockedFromValues(pot)) return false;
+  if (potIsLocked(pot)) return false;
   return pot.status === "joinable";
+}
+
+function potCurrentlyClaimed(pot) {
+  return potHasClaimer(pot);
 }
 
 /** Same universe as GET /pots: must have seen init-pot or pot-registered (not bare pre-init). */
@@ -88,14 +119,31 @@ function emptyAgg() {
 
 export function computeStatistics(events = [], listedPots = [], { stackspotsContract } = {}) {
   const potsMap = new Map();
+  const liveByAddress = new Map();
+
+  const potKey = (address) => String(address ?? "").trim().toLowerCase();
+  const readPot = (address) => {
+    const key = potKey(address);
+    return key ? potsMap.get(key) ?? null : null;
+  };
+  const writePot = (pot) => {
+    if (!pot?.potAddress) return;
+    const key = potKey(pot.potAddress);
+    const live = pot.live ?? liveByAddress.get(key) ?? null;
+    potsMap.set(key, { ...pot, live });
+  };
+
   for (const pot of listedPots) {
     const normalized = normalizeListedPot(pot);
     if (!normalized?.potAddress) continue;
-    potsMap.set(normalized.potAddress, { ...normalized });
+    const key = potKey(normalized.potAddress);
+    const live = pot.live ?? normalized.live ?? null;
+    if (live && typeof live === "object") liveByAddress.set(key, live);
+    writePot({ ...normalized, live });
   }
 
   const byEvent = {};
-    const participants = new Set();
+  const participants = new Set();
   const sponsors = new Set();
   const platformSponsors = new Set();
   const platformSponsorContracts = new Set();
@@ -126,8 +174,9 @@ export function computeStatistics(events = [], listedPots = [], { stackspotsCont
     byEvent[name] = (byEvent[name] ?? 0) + 1;
 
     if (isPotEvent(name)) {
-      const updated = applyEventToPot(potsMap.get(resolvePotAddress(event, stackspotsContract)), event, stackspotsContract);
-      if (updated?.potAddress) potsMap.set(updated.potAddress, updated);
+      const address = resolvePotAddress(event, stackspotsContract);
+      const updated = applyEventToPot(readPot(address), event, stackspotsContract);
+      if (updated?.potAddress) writePot(updated);
     }
 
     const unique = !seenActivity.has(activityDedupeKey(event));
@@ -243,10 +292,11 @@ export function computeStatistics(events = [], listedPots = [], { stackspotsCont
     if (status) byStatus[status] += 1;
   }
 
-  // Lifecycle "started" = ever started (claimed pots still count; cancel-without-start does not).
+  // Lifecycle "started" = ever started / locked (claimed pots still count).
   byStatus.started = pots.filter(potEverStarted).length;
-  // Joinable = currently open only (exclude started/locked even if status string lagged).
+  // Joinable = currently open only (exclude started/locked/claimed — matches pots UI).
   byStatus.joinable = pots.filter(potCurrentlyJoinable).length;
+  byStatus.claimed = pots.filter(potCurrentlyClaimed).length;
 
   for (const [address, amount] of yieldByPot) {
     const key = String(address).trim().toLowerCase();

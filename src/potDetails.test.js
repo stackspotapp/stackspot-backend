@@ -5,6 +5,7 @@ import {
   bindingsFromSponsorEvents,
   extractedPotDetails,
   filterPotsForDetails,
+  extractSponsorPoolConfig,
   initPayloadFromEvent,
   initPotPrintForPot,
   initPotPrintsForSponsor,
@@ -95,6 +96,30 @@ test("pot details keep only values decoded from result hex", () => {
   assert.equal(extracted.owner, undefined);
   assert.equal(extracted.function, undefined);
   assert.equal(extracted.args, undefined);
+});
+
+test("sponsor pool config extraction normalizes get-pool-config tuples", () => {
+  const cfg = extractSponsorPoolConfig({
+    values: {
+      "join-end": "99",
+      "prepare-start": "100",
+      "cycle-end": "200",
+      "reward-release": "250",
+    },
+  });
+  assert.deepEqual(cfg, {
+    "join-end": "99",
+    "prepare-start": "100",
+    "cycle-end": "200",
+    "reward-release": "250",
+  });
+
+  assert.deepEqual(extractSponsorPoolConfig({ values: { "pool-config": { "join-end": "10" } } }), {
+    "join-end": "10",
+    "prepare-start": null,
+    "cycle-end": null,
+    "reward-release": null,
+  });
 });
 
 test("owner filter matches pot-owner and deployer wallet", () => {
