@@ -15,6 +15,43 @@ export function isSponsorContractId(value) {
   return isPotContractId(value);
 }
 
+/** Flatten `(ok {sponsor-contract, ticket-id})` printed by init-pot. */
+export function unwrapSponsorTicket(row) {
+  if (row == null || typeof row !== "object" || Array.isArray(row)) return null;
+  if (row.ok === false) return null;
+  if (
+    (row.ok === true || row.type === "response") &&
+    row.value &&
+    typeof row.value === "object" &&
+    !Array.isArray(row.value)
+  ) {
+    return unwrapSponsorTicket(row.value);
+  }
+  if (row.type === "tuple" && row.value && typeof row.value === "object" && !Array.isArray(row.value)) {
+    return unwrapSponsorTicket(row.value);
+  }
+  return row;
+}
+
+export function sponsorContractFromTicket(row) {
+  const ticket = unwrapSponsorTicket(row);
+  if (!ticket) return null;
+  const id = ticket["sponsor-contract"] ?? ticket.sponsorContract ?? ticket.contract;
+  return isSponsorContractId(id) ? String(id) : null;
+}
+
+export function ticketIdFromTicket(row) {
+  const ticket = unwrapSponsorTicket(row);
+  if (!ticket) return null;
+  const id = ticket["ticket-id"] ?? ticket.ticketId;
+  return id == null || id === "" ? null : String(id);
+}
+
+export function normalizeSponsorTickets(list) {
+  if (!Array.isArray(list)) return list;
+  return list.map(unwrapSponsorTicket).filter(Boolean);
+}
+
 function firstContractId(...candidates) {
   for (const value of candidates) {
     if (isSponsorContractId(value)) return value;
@@ -98,8 +135,8 @@ export function sponsorIndexKeys(event, stackspotsContract) {
   }
   if (Array.isArray(values.sponsors)) {
     for (const row of values.sponsors) {
-      const id = row?.["sponsor-contract"] ?? row?.sponsorContract;
-      if (isSponsorContractId(id)) keys.add(String(id));
+      const id = sponsorContractFromTicket(row);
+      if (id) keys.add(id);
     }
   }
   return [...keys];

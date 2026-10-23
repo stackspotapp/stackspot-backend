@@ -15,6 +15,20 @@ const STACKSPOTS = "ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.stackspots";
 const POT = "ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.jackpot";
 const WALLET = "ST2CY5V39NHDPWSXMW9QDT3HC3GD6Q6XX4CFRK9AG";
 
+test("init-pot (ok) sponsor tickets still index the sponsor contract", () => {
+  const keys = sponsorIndexKeys(
+    {
+      event: "init-pot",
+      values: {
+        contract: POT,
+        sponsors: [{ ok: true, value: { "sponsor-contract": SPONSOR, "ticket-id": "1" } }],
+      },
+    },
+    STACKSPOTS,
+  );
+  assert.equal(keys.includes(SPONSOR), true);
+});
+
 test("init-pot sponsors list indexes each sponsor contract", () => {
   const keys = sponsorIndexKeys(
     {

@@ -282,6 +282,31 @@ test("sponsor pots route returns only matching init-pot prints", () => {
   assert.equal(prints[0]["pot-details"], undefined);
 });
 
+test("sponsor pots match (ok {sponsor-contract, ticket-id}) init tickets", () => {
+  const prints = initPotPrintsForSponsor(
+    [
+      {
+        event: "init-pot",
+        txid: "0xok",
+        values: {
+          contract: POT,
+          type: "jackpot",
+          sponsors: [
+            { ok: true, value: { "sponsor-contract": SPONSOR, "ticket-id": "4" } },
+            { ok: false, value: { "sponsor-contract": `${OTHER}.miss`, "ticket-id": "9" } },
+          ],
+        },
+      },
+    ],
+    SPONSOR,
+  );
+  assert.equal(prints.length, 1);
+  assert.equal(prints[0].contract, POT);
+  assert.equal(prints[0].sponsors[0]["sponsor-contract"], SPONSOR);
+  assert.equal(prints[0].sponsors[0]["ticket-id"], "4");
+  assert.equal(prints[0].sponsors.length, 1);
+});
+
 test("sponsor contract route bindings come from tickets and init-pot sponsors", () => {
   const events = [
     {

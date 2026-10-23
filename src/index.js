@@ -3,7 +3,7 @@ import express from "express";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { STACKSPOTS_EVENTS, toPublicEvent } from "./catalog.js";
-import { withProjectName } from "./sponsors.js";
+import { sponsorContractFromTicket, withProjectName } from "./sponsors.js";
 import {
   compactStoredEvents,
   rebuildSponsorsFromEvents,
@@ -346,7 +346,7 @@ async function potDetailsHandler(req, res, next) {
         const listed = Array.isArray(event?.sponsors) ? event.sponsors : [];
         if (!listed.length) return true;
         return listed.some((row) => {
-          const id = row?.["sponsor-contract"] ?? row?.sponsorContract;
+          const id = sponsorContractFromTicket(row);
           return String(id ?? "").trim().toLowerCase() === wantSponsor;
         });
       })

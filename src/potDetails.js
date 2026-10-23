@@ -6,7 +6,12 @@ import { serializeArgs, sponsorDetailsArgsFromPotValues } from "./encode.js";
 import { callReadOnly, parseContractId, parseFunctionName } from "./hiro.js";
 import { networkFromPrincipal } from "./network.js";
 import { isPotContractId, isPreInitPotRow, normalizeListedPot } from "./pots.js";
-import { isSponsorContractId } from "./sponsors.js";
+import {
+  isSponsorContractId,
+  normalizeSponsorTickets,
+  sponsorContractFromTicket,
+  ticketIdFromTicket,
+} from "./sponsors.js";
 
 function samePrincipal(a, b) {
   if (a == null || b == null || a === "" || b === "") return false;
@@ -49,13 +54,7 @@ export function parseOptionalPrincipal(raw, label) {
 function potSponsorsFromValues(values) {
   if (!values || typeof values !== "object") return [];
   const list = Array.isArray(values.sponsors) ? values.sponsors : [];
-  return list
-    .map((row) => {
-      if (!row || typeof row !== "object") return null;
-      const contract = row["sponsor-contract"] ?? row.sponsorContract ?? row.sponsor;
-      return isSponsorContractId(contract) ? String(contract) : null;
-    })
-    .filter(Boolean);
+  return list.map((row) => sponsorContractFromTicket(row)).filter(Boolean);
 }
 
 export function sponsorContractsForPot(pot = {}, values = {}) {
@@ -79,7 +78,7 @@ export function sponsorContractsForPot(pot = {}, values = {}) {
   for (const row of extra) {
     if (typeof row === "string") add(row);
     else if (row && typeof row === "object") {
-      add(row["sponsor-contract"] ?? row.sponsorContract ?? row.contract ?? row.sponsor);
+      add(sponsorContractFromTicket(row) ?? row.sponsor);
     }
   }
   return ids;
@@ -105,9 +104,7 @@ export function potMatchesSponsor(pot, sponsorContract, sponsorTickets = []) {
 }
 
 function ticketIdOf(row) {
-  if (!row || typeof row !== "object") return null;
-  const id = row["ticket-id"] ?? row.ticketId;
-  return id == null || id === "" ? null : String(id);
+  return ticketIdFromTicket(row);
 }
 
 function rememberBinding(byPot, potAddress, extra) {
@@ -162,10 +159,11 @@ export function initPayloadFromEvent(event) {
   const name = String(print.event ?? event?.event ?? "").trim();
   const txid = eventTxId(event) ?? event?.txid ?? event?.txId ?? null;
   if (name === "init-pot") {
+    const sponsors = normalizeSponsorTickets(print.sponsors);
     return toPublicEvent({
       ...event,
       event: "init-pot",
-      values: print,
+      values: { ...print, ...(Array.isArray(sponsors) ? { sponsors } : {}) },
       txId: txid,
       txid,
     });
@@ -175,9 +173,11 @@ export function initPayloadFromEvent(event) {
   if (!nested || typeof nested !== "object" || Array.isArray(nested)) return null;
   const contract = nested.contract ?? nested["pot-treasury"] ?? print["pot-address"];
   if (!contract) return null;
+  const sponsors = normalizeSponsorTickets(nested.sponsors);
   return {
     event: "init-pot",
     ...nested,
+    ...(Array.isArray(sponsors) ? { sponsors } : {}),
     contract,
     txid,
   };
@@ -216,9 +216,7 @@ export function initPotPrintsForSponsor(events, sponsorContract, extraPotContrac
     if (!logged) continue;
     const contract = String(logged.contract ?? logged["pot-treasury"] ?? "").trim();
     const listed = Array.isArray(logged.sponsors)
-      ? logged.sponsors.some((row) =>
-          samePrincipal(row?.["sponsor-contract"] ?? row?.sponsorContract, sponsorContract),
-        )
+      ? logged.sponsors.some((row) => samePrincipal(sponsorContractFromTicket(row), sponsorContract))
       : false;
     if (!listed && !extra.has(contract.toLowerCase())) continue;
     const txid = eventTxId(event);
@@ -250,10 +248,7 @@ export function bindingsFromSponsorEvents(events, sponsorContract) {
     }
     if (name === "init-pot") {
       const list = Array.isArray(print.sponsors) ? print.sponsors : [];
-      const match = list.find((row) => {
-        const id = row?.["sponsor-contract"] ?? row?.sponsorContract;
-        return String(id ?? "").trim().toLowerCase() === want;
-      });
+      const match = list.find((row) => samePrincipal(sponsorContractFromTicket(row), sponsorContract));
       if (!match) continue;
       rememberBinding(byPot, print.contract ?? print["pot-treasury"] ?? print["pot-contract"], {
         ticketId: ticketIdOf(match),
