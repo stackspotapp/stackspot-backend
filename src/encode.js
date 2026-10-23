@@ -116,3 +116,38 @@ export function serializeArgs(args = []) {
   }
   return args.map(serializeArg);
 }
+
+function asUintString(value) {
+  if (value == null) return "0";
+  if (typeof value === "bigint") return value.toString();
+  if (typeof value === "object" && value !== null && "value" in value) {
+    return asUintString(value.value);
+  }
+  const text = String(value).trim();
+  return /^\d+$/.test(text) ? text : "0";
+}
+
+/** Clarity arg for `get-sponsor-details ({balance, participant-count, lock-burn-height})`. */
+export function sponsorDetailsTupleArg(metrics = {}) {
+  return {
+    type: "tuple",
+    value: {
+      balance: { type: "uint", value: asUintString(metrics.balance) },
+      "participant-count": { type: "uint", value: asUintString(metrics.participantCount) },
+      "lock-burn-height": { type: "uint", value: asUintString(metrics.lockBurnHeight) },
+    },
+  };
+}
+
+export function sponsorDetailsArgsFromPotValues(values = {}) {
+  const row = values && typeof values === "object" ? values : {};
+  return [
+    sponsorDetailsTupleArg({
+      balance: row["pot-value"] ?? row.potValue ?? row.balance,
+      participantCount:
+        row["pot-participants-count"] ?? row.potParticipantsCount ?? row["participant-count"],
+      lockBurnHeight:
+        row["pot-lock-burn-height"] ?? row.potLockBurnHeight ?? row["lock-burn-height"],
+    }),
+  ];
+}

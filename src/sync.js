@@ -1,5 +1,5 @@
-import { config } from "./config.js";
-import { isStackspotsLogType } from "./catalog.js";
+import { config, isAcceptedPrintSource, platformSiblingContract, PRE_INIT_LOGS_CONTRACT_NAME } from "./config.js";
+import { canonicalizeEventName, isStackspotsLogType } from "./catalog.js";
 import { decodePrintHex, expandEncodedValues } from "./decoder.js";
 import { fetchAddressDeployedContracts, fetchNewLogs } from "./hiro.js";
 import { apiUrlForNetwork } from "./network.js";
@@ -20,12 +20,15 @@ import { isLikelyPotContract, isPotContractId } from "./pots.js";
 /** In-memory sync row. Redis stores only the extracted print fields plus txid. */
 export function toCachedEvent(log) {
   const id = `${log.txId}:${log.eventIndex}`;
+  if (!log.hex) return { id, skip: true, retry: true };
   const decoded = decodePrintHex(log.hex);
+  if (decoded.decodeError) return { id, skip: true, retry: true };
   if (!isStackspotsLogType(decoded.event) || !decoded.values || typeof decoded.values !== "object") {
     return { id, skip: true };
   }
 
-  const values = expandEncodedValues({ ...decoded.values, event: decoded.event });
+  const event = canonicalizeEventName(decoded.event);
+  const values = expandEncodedValues({ ...decoded.values, event });
   const burnFromValues = Number(values?.["burn-block-height"] ?? 0);
   const stacksFromValues = Number(values?.["stacks-block-height"] ?? 0);
   const blockHeight =
@@ -39,7 +42,7 @@ export function toCachedEvent(log) {
     id,
     txId: log.txId,
     eventIndex: log.eventIndex ?? 0,
-    event: decoded.event,
+    event,
     contractId: log.contractId ?? null,
     blockHeight,
     burnBlockHeight,
@@ -55,13 +58,11 @@ async function syncContract(contractId, ctx, { full, maxPages } = {}) {
     maxPages: maxPages ?? config.maxSyncPages,
   });
   const mapped = logs.map(toCachedEvent);
-  const core = String(ctx.contract ?? "").trim().toLowerCase();
   const kept = mapped.filter((event) => {
     if (!event || event.skip) return false;
-    const source = String(event.contractId ?? "").trim().toLowerCase();
-    return !core || !source || source === core;
+    return isAcceptedPrintSource(event.contractId, ctx, contractId);
   });
-  const skipped = mapped.filter((event) => event?.skip).map((event) => event.id);
+  const skipped = mapped.filter((event) => event?.skip && !event.retry).map((event) => event.id);
   const stored = await saveEvents(kept, ctx);
   if (skipped.length) await rememberEventIds(skipped, ctx);
   return { fetched: logs.length, stored, mode, truncated: Boolean(truncated) };
@@ -110,10 +111,15 @@ export async function syncOwnerDeployedPots(owner, ctx, options = {}) {
 const releasedNetworks = new Set();
 
 export async function runSync({ full = false, network, contract } = {}) {
+  const networkName = network ?? config.defaultNetwork;
+  const stackspots = contract ?? config.contracts[networkName];
   const ctx = {
-    network: network ?? config.defaultNetwork,
-    contract: contract ?? config.contracts[network ?? config.defaultNetwork],
-    stacksApiUrl: apiUrlForNetwork(network ?? config.defaultNetwork),
+    network: networkName,
+    contract: stackspots,
+    preInitLogsContract:
+      config.preInitLogsContracts[networkName] ??
+      platformSiblingContract(stackspots, PRE_INIT_LOGS_CONTRACT_NAME),
+    stacksApiUrl: apiUrlForNetwork(networkName),
   };
   if (!ctx.contract) {
     const error = new Error(
@@ -140,14 +146,29 @@ export async function runSync({ full = false, network, contract } = {}) {
   }
 
   console.log(`[sync] ${ctx.network} fetching ${ctx.contract}`);
-  const stackspots = await syncContract(ctx.contract, ctx, { full });
-  fetched += stackspots.fetched;
-  stored += stackspots.stored;
-  mode = stackspots.mode;
-  console.log(`[sync] ${ctx.network} platform stored ${stackspots.stored}/${stackspots.fetched}`);
+  const platform = await syncContract(ctx.contract, ctx, { full });
+  fetched += platform.fetched;
+  stored += platform.stored;
+  mode = platform.mode;
+  console.log(`[sync] ${ctx.network} platform stored ${platform.stored}/${platform.fetched}`);
+
+  if (ctx.preInitLogsContract && ctx.preInitLogsContract !== ctx.contract) {
+    console.log(`[sync] ${ctx.network} fetching ${ctx.preInitLogsContract}`);
+    try {
+      const preInit = await syncContract(ctx.preInitLogsContract, ctx, { full });
+      fetched += preInit.fetched;
+      stored += preInit.stored;
+      if (preInit.mode) mode = preInit.mode;
+      console.log(
+        `[sync] ${ctx.network} pre-init-logs stored ${preInit.stored}/${preInit.fetched}`,
+      );
+    } catch (error) {
+      console.error(`[sync] ${ctx.network} ${ctx.preInitLogsContract}`, error.message);
+    }
+  }
 
   await rebuildSponsorsFromEvents(ctx);
-  if (!stackspots.truncated) await markFullPrintSchema(ctx);
+  if (!platform.truncated) await markFullPrintSchema(ctx);
 
   const { total } = await listEventIds({ ...ctx, limit: 1 });
   await setSyncState(
@@ -160,7 +181,15 @@ export async function runSync({ full = false, network, contract } = {}) {
     },
     ctx,
   );
-  return { network: ctx.network, contract: ctx.contract, fetched, stored, total, mode };
+  return {
+    network: ctx.network,
+    contract: ctx.contract,
+    preInitLogsContract: ctx.preInitLogsContract ?? null,
+    fetched,
+    stored,
+    total,
+    mode,
+  };
 }
 
 export async function runSyncSafe(options) {

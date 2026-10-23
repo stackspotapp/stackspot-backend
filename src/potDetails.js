@@ -1,8 +1,8 @@
-import { getCachedContract, setCachedContract, setPotLive } from "./cache.js";
+import { getCachedContract, getSponsorLives, setCachedContract, setPotLive, setSponsorLive } from "./cache.js";
 import { eventPrint, eventTxId, toPublicEvent } from "./catalog.js";
 import { config } from "./config.js";
 import { decodeClarityResult, decodePrintHex, expandEncodedValues } from "./decoder.js";
-import { serializeArgs } from "./encode.js";
+import { serializeArgs, sponsorDetailsArgsFromPotValues } from "./encode.js";
 import { callReadOnly, parseContractId, parseFunctionName } from "./hiro.js";
 import { networkFromPrincipal } from "./network.js";
 import { isPotContractId, isPreInitPotRow, normalizeListedPot } from "./pots.js";
@@ -56,6 +56,33 @@ function potSponsorsFromValues(values) {
       return isSponsorContractId(contract) ? String(contract) : null;
     })
     .filter(Boolean);
+}
+
+export function sponsorContractsForPot(pot = {}, values = {}) {
+  const ids = [];
+  const seen = new Set();
+  const add = (raw) => {
+    const id = String(raw ?? "").trim();
+    if (!isSponsorContractId(id)) return;
+    const key = id.toLowerCase();
+    if (seen.has(key)) return;
+    seen.add(key);
+    ids.push(id);
+  };
+  for (const id of potSponsorsFromValues(pot?.values)) add(id);
+  for (const id of potSponsorsFromValues(values)) add(id);
+  const extra = [
+    ...(Array.isArray(values?.["init-sponsor-tickets"]) ? values["init-sponsor-tickets"] : []),
+    ...(Array.isArray(pot?.values?.["init-sponsor-tickets"]) ? pot.values["init-sponsor-tickets"] : []),
+    ...(Array.isArray(values?.["platform-sponsors"]) ? values["platform-sponsors"] : []),
+  ];
+  for (const row of extra) {
+    if (typeof row === "string") add(row);
+    else if (row && typeof row === "object") {
+      add(row["sponsor-contract"] ?? row.sponsorContract ?? row.contract ?? row.sponsor);
+    }
+  }
+  return ids;
 }
 
 export function potMatchesOwner(pot, owner) {
@@ -113,7 +140,7 @@ export function sponsorsFromPrintLogs(logs, potContract) {
     if (decoded.event === "init-pot") {
       const contract = decoded.values.contract ?? decoded.values["pot-treasury"];
       if (potContract && contract && !samePrincipal(contract, potContract)) continue;
-    } else if (decoded.event !== "pot-registered") {
+    } else if (decoded.event !== "pot-registered" && decoded.event !== "register-pot") {
       continue;
     }
     const sponsors = sponsorsFromDecoded(decoded.values);
@@ -127,8 +154,8 @@ function loggedInitPot(event) {
 }
 
 /**
- * Pots-page payload. A core-contract `init-pot` print is returned as-is.
- * `register-pot` only stores that same tuple as the `pot-values` buffer on `pot-registered`.
+ * Pots-page payload. Stackspots `register-pot` (cached as `pot-registered`) carries
+ * the pot `init-pot` tuple in `pot-values`. A pot-contract `init-pot` print is the fallback.
  */
 export function initPayloadFromEvent(event) {
   const print = expandEncodedValues(eventPrint(event));
@@ -143,7 +170,7 @@ export function initPayloadFromEvent(event) {
       txid,
     });
   }
-  if (name !== "pot-registered") return null;
+  if (name !== "pot-registered" && name !== "register-pot") return null;
   const nested = print["pot-values"];
   if (!nested || typeof nested !== "object" || Array.isArray(nested)) return null;
   const contract = nested.contract ?? nested["pot-treasury"] ?? print["pot-address"];
@@ -184,7 +211,7 @@ export function initPotPrintsForSponsor(events, sponsorContract, extraPotContrac
   for (const event of events ?? []) {
     const print = expandEncodedValues(eventPrint(event));
     const name = String(event?.event ?? print.event ?? "").trim();
-    if (name !== "init-pot" && name !== "pot-registered") continue;
+    if (name !== "init-pot" && name !== "pot-registered" && name !== "register-pot") continue;
     const logged = initPayloadFromEvent({ ...event, event: name, values: print, txid: eventTxId(event) });
     if (!logged) continue;
     const contract = String(logged.contract ?? logged["pot-treasury"] ?? "").trim();
@@ -399,6 +426,76 @@ async function optionalRead(options) {
   return readCachedFunction(options);
 }
 
+export async function loadSponsorContractState({
+  contractId,
+  sender,
+  refresh = false,
+  ctx,
+  potValues = null,
+  /** Pot contract principal — Clarity `tx-sender` for get-sponsor-details. */
+  potAddress = null,
+}) {
+  const parsed = parseContractId(contractId);
+  const from = potAddress || sender || parsed.address;
+  const row = await optionalRead({
+    contractId: parsed.contractId,
+    functionName: "get-sponsor-details",
+    sender: from,
+    args: sponsorDetailsArgsFromPotValues(potValues),
+    refresh,
+    ctx,
+  });
+  const decoded = readValue(row);
+  const details =
+    decoded.ok && decoded.value && typeof decoded.value === "object" && !Array.isArray(decoded.value)
+      ? decoded.value
+      : null;
+  const values = {
+    contract: parsed.contractId,
+    ok: Boolean(decoded.ok && details),
+    ...(details ?? {}),
+  };
+  if (values.ok) await setSponsorLive(parsed.contractId, values, ctx);
+  return values;
+}
+
+export async function attachSponsorContractLives(rows, ctx, { refresh = false } = {}) {
+  const list = Array.isArray(rows) ? rows : [];
+  const ids = [
+    ...new Set(
+      list
+        .map((row) => {
+          const id = row?.["sponsor-contract"] ?? row?.sponsorContract ?? row?.contract;
+          return isSponsorContractId(id) ? String(id) : null;
+        })
+        .filter(Boolean),
+    ),
+  ];
+  let lives = await getSponsorLives(ids, ctx);
+  const missing = refresh
+    ? ids
+    : ids.filter((id) => !lives.has(String(id).toLowerCase()));
+  if (missing.length) {
+    await Promise.all(
+      missing.map((id) =>
+        loadSponsorContractState({
+          contractId: id,
+          refresh,
+          ctx,
+        }).catch(() => null),
+      ),
+    );
+    lives = await getSponsorLives(ids, ctx);
+  }
+  return list.map((row) => {
+    const id = String(row?.["sponsor-contract"] ?? row?.sponsorContract ?? row?.contract ?? "")
+      .trim()
+      .toLowerCase();
+    const live = id ? lives.get(id) : null;
+    return live ? { ...row, live } : row;
+  });
+}
+
 const EXTRA_FIELDS = {
   "get-pot-is-init": "pot-is-init",
   "get-pot-id": "pot-id",
@@ -419,23 +516,6 @@ function readValue(row) {
   return { ok: true, value: row.values };
 }
 
-export function extractSponsorPoolConfig(values) {
-  const payload = values && typeof values === "object" ? values : {};
-  const direct = payload.values && typeof payload.values === "object" ? payload.values : payload;
-  const nested = direct && typeof direct === "object" && "pool-config" in direct
-    ? direct["pool-config"]
-    : direct && typeof direct === "object" && "poolConfig" in direct
-      ? direct.poolConfig
-      : direct;
-  const source = nested && typeof nested === "object" ? nested : {};
-  return {
-    "join-end": source["join-end"] ?? source.joinEnd ?? null,
-    "prepare-start": source["prepare-start"] ?? source.prepareStart ?? null,
-    "cycle-end": source["cycle-end"] ?? source.cycleEnd ?? null,
-    "reward-release": source["reward-release"] ?? source.rewardRelease ?? null,
-  };
-}
-
 /** Decoded read-only values only. Call metadata is not part of the result hex. */
 export function extractedPotDetails(details, extras = {}) {
   const out = {};
@@ -450,36 +530,6 @@ export function extractedPotDetails(details, extras = {}) {
     out[field] = read.value;
   }
   return out;
-}
-
-export async function loadSponsorPoolConfig({
-  sponsorContract,
-  burnHeight,
-  sender,
-  refresh = false,
-  ctx,
-}) {
-  if (!isSponsorContractId(sponsorContract)) {
-    return null;
-  }
-  const height = Number(burnHeight ?? 0);
-  const target = String(sponsorContract).trim();
-  const payload = await readCachedFunction({
-    contractId: target,
-    functionName: "get-pool-config",
-    sender: sender || walletOf(target),
-    args: [{ type: "uint", value: String(height || 0) }],
-    refresh,
-    ctx,
-  });
-  if (!payload || !payload.ok || !payload.values || typeof payload.values !== "object") {
-    return null;
-  }
-  const cfg = extractSponsorPoolConfig(payload);
-  if (!cfg || (!cfg["join-end"] && !cfg["prepare-start"] && !cfg["cycle-end"] && !cfg["reward-release"])) {
-    return null;
-  }
-  return cfg;
 }
 
 export async function loadLivePotDetails({
@@ -499,29 +549,8 @@ export async function loadLivePotDetails({
   }
 
   const sender = owner || walletOf(target);
-  const potType = String(pot?.potType ?? pot?.values?.["pot-type"] ?? pot?.values?.type ?? "").toLowerCase();
 
-  const extraNames = [
-    "get-pot-is-init",
-    "get-pot-id",
-    "get-pot-cycle",
-    "get-pot-name",
-    "get-pot-min-amount",
-    "get-pot-max-participants",
-  ];
-  if (potType.includes("sequential")) {
-    extraNames.push("get-next-payment-id", "get-pot-session-status");
-  }
-
-  const extraJobs = extraNames.map((functionName) =>
-    optionalRead({
-      contractId: target,
-      functionName,
-      sender,
-      refresh,
-      ctx,
-    }).then((row) => [functionName, row]),
-  );
+  const extraJobs = [];
   if (stackspotsContract) {
     extraJobs.push(
       optionalRead({
@@ -559,6 +588,33 @@ export async function loadLivePotDetails({
   ]);
   const extras = Object.fromEntries(extraPairs.map(([name, row]) => [name, omitClarity(row)]));
   const values = extractedPotDetails(details, extras);
+  if (values["pot-is-init"] == null && values["is-initiated"] != null) {
+    values["pot-is-init"] = values["is-initiated"];
+  }
+  const sponsorIds = sponsorContractsForPot(pot, values);
+  values["platform-sponsors"] = sponsorIds.length
+    ? await Promise.all(
+        sponsorIds.map((id) =>
+          loadSponsorContractState({
+            contractId: id,
+            potAddress: target,
+            refresh,
+            ctx,
+            potValues: values,
+          }).catch((error) => ({
+            contract: id,
+            ok: false,
+            error: error.message ?? "get-sponsor-details failed",
+          })),
+        ),
+      )
+    : [];
+  if (sponsorContract && Array.isArray(values["platform-sponsors"])) {
+    const mine = values["platform-sponsors"].find(
+      (row) => String(row?.contract ?? "").trim().toLowerCase() === String(sponsorContract).trim().toLowerCase(),
+    );
+    if (mine && mine["rules-score"] != null) values["rules-score"] = mine["rules-score"];
+  }
   if (Object.keys(values).length > 0) {
     await setPotLive(target, values, ctx);
   }

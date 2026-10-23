@@ -181,7 +181,7 @@ export async function fetchNewLogs({
     });
 
     if (unknownOnPage === 0) break;
-    if (!batch.nextCursor) break;
+    if (!batch.nextCursor || batch.nextCursor === cursor) break;
     if (page === maxPages - 1) truncated = true;
 
     if (batch.mode === "v1") {

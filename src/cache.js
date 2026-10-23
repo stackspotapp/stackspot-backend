@@ -5,6 +5,7 @@ import { fetchTransaction } from "./hiro.js";
 import { apiUrlForNetwork } from "./network.js";
 import {
   applyEventToPot,
+  isRegisterPotEvent,
   mergePotRecord,
   normalizeListedPot,
   potEventKey,
@@ -33,8 +34,9 @@ function keysFor(network) {
     ids: `${ns}:ids`,
     alias: (id) => `${ns}:alias:${id}`,
     potLive: (id) => `${ns}:pot-live:${String(id).trim().toLowerCase()}`,
+    sponsorLive: (id) => `${ns}:sponsor-live:${String(id).trim().toLowerCase()}`,
     contract: (id) => `${ns}:contract:${id}`,
-    stats: `${ns}:stats:snapshot`,
+    stats: `${ns}:stats:snapshot:v3`,
   };
 }
 
@@ -52,15 +54,23 @@ export async function connectRedis() {
   const useTls = url.startsWith("rediss://");
   client = createClient({
     url,
-    socket: useTls
-      ? {
-          tls: true,
-          rejectUnauthorized: process.env.REDIS_TLS_INSECURE !== "1",
-        }
-      : undefined,
+    socket: {
+      reconnectStrategy(retries) {
+        return Math.min(500 * 2 ** Math.min(retries, 6), 15_000);
+      },
+      ...(useTls
+        ? {
+            tls: true,
+            rejectUnauthorized: process.env.REDIS_TLS_INSECURE !== "1",
+          }
+        : {}),
+    },
   });
   client.on("error", (err) => {
     console.error("[redis]", err.message);
+  });
+  client.on("reconnecting", () => {
+    console.error("[redis] reconnecting");
   });
   await client.connect();
   return client;
@@ -626,6 +636,7 @@ export async function listPots({ status, event, ...ctx } = {}) {
   } else if (status && POT_STATUSES.includes(status)) {
     pots = pots.filter((pot) => pot.status === status);
   }
+  pots = pots.filter((pot) => !isRegisterPotEvent(potEventKey(pot)));
   return pots;
 }
 
@@ -804,6 +815,64 @@ export async function getPotLives(contractIds, ctx = {}) {
   if (!ids.length) return new Map();
   const { keys } = scope(ctx);
   const raws = await getRedis().mGet(ids.map((id) => keys.potLive(id)));
+  const out = new Map();
+  ids.forEach((id, index) => {
+    if (!raws[index]) return;
+    try {
+      const parsed = JSON.parse(raws[index]);
+      if (parsed?.values) out.set(id.toLowerCase(), parsed.values);
+    } catch {
+      // skip a corrupt live snapshot
+    }
+  });
+  return out;
+}
+
+export async function setSponsorLive(contractId, values, ctx = {}) {
+  const id = String(contractId ?? "").trim();
+  if (!id || !values || typeof values !== "object") return null;
+  const redis = getRedis();
+  const { keys } = scope(ctx);
+  const updatedAt = Date.now();
+  const snapshot = { contract: id, updatedAt, values };
+  await redis.set(keys.sponsorLive(id), JSON.stringify(snapshot));
+
+  const sponsors = await redis.hGetAll(keys.sponsors);
+  const want = id.toLowerCase();
+  for (const [hashKey, raw] of Object.entries(sponsors)) {
+    let sponsor = null;
+    try {
+      sponsor = raw ? JSON.parse(raw) : null;
+    } catch {
+      sponsor = null;
+    }
+    if (!sponsor || typeof sponsor !== "object") continue;
+    const address = String(sponsor.sponsorContract ?? hashKey).trim().toLowerCase();
+    if (address !== want && String(hashKey).trim().toLowerCase() !== want) continue;
+    sponsor.live = values;
+    sponsor.liveUpdatedAt = updatedAt;
+    await redis.hSet(keys.sponsors, hashKey, JSON.stringify(sponsor));
+  }
+  return snapshot;
+}
+
+export async function getSponsorLive(contractId, ctx = {}) {
+  const id = String(contractId ?? "").trim();
+  if (!id) return null;
+  const raw = await getRedis().get(scope(ctx).keys.sponsorLive(id));
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
+}
+
+export async function getSponsorLives(contractIds, ctx = {}) {
+  const ids = [...new Set((contractIds ?? []).map((id) => String(id ?? "").trim()).filter(Boolean))];
+  if (!ids.length) return new Map();
+  const { keys } = scope(ctx);
+  const raws = await getRedis().mGet(ids.map((id) => keys.sponsorLive(id)));
   const out = new Map();
   ids.forEach((id, index) => {
     if (!raws[index]) return;

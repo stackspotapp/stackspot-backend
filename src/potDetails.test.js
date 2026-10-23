@@ -5,7 +5,6 @@ import {
   bindingsFromSponsorEvents,
   extractedPotDetails,
   filterPotsForDetails,
-  extractSponsorPoolConfig,
   initPayloadFromEvent,
   initPotPrintForPot,
   initPotPrintsForSponsor,
@@ -14,6 +13,7 @@ import {
   potsSponsoredBy,
   preInitRowsForOwner,
   sponsorsFromPrintLogs,
+  sponsorContractsForPot,
 } from "./potDetails.js";
 
 const OWNER = "ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM";
@@ -51,6 +51,9 @@ test("pot details keep only values decoded from result hex", () => {
     ok: true,
     values: {
       "is-joined": null,
+      "is-participant": false,
+      "is-sponsor": false,
+      "is-initiated": false,
       "pot-value": "0",
       "pot-locked": false,
       "pool-config": { "join-end": "15800" },
@@ -81,6 +84,9 @@ test("pot details keep only values decoded from result hex", () => {
   });
   assert.deepEqual(extracted, {
     "is-joined": null,
+    "is-participant": false,
+    "is-sponsor": false,
+    "is-initiated": false,
     "pot-value": "0",
     "pot-locked": false,
     "pool-config": { "join-end": "15800" },
@@ -92,34 +98,19 @@ test("pot details keep only values decoded from result hex", () => {
     "pot-max-participants": "100",
     "is-contract-allowed-hash": true,
   });
+  assert.deepEqual(extractedPotDetails(details, {}), {
+    "is-joined": null,
+    "is-participant": false,
+    "is-sponsor": false,
+    "is-initiated": false,
+    "pot-value": "0",
+    "pot-locked": false,
+    "pool-config": { "join-end": "15800" },
+  });
   assert.equal(extracted.contractId, undefined);
   assert.equal(extracted.owner, undefined);
   assert.equal(extracted.function, undefined);
   assert.equal(extracted.args, undefined);
-});
-
-test("sponsor pool config extraction normalizes get-pool-config tuples", () => {
-  const cfg = extractSponsorPoolConfig({
-    values: {
-      "join-end": "99",
-      "prepare-start": "100",
-      "cycle-end": "200",
-      "reward-release": "250",
-    },
-  });
-  assert.deepEqual(cfg, {
-    "join-end": "99",
-    "prepare-start": "100",
-    "cycle-end": "200",
-    "reward-release": "250",
-  });
-
-  assert.deepEqual(extractSponsorPoolConfig({ values: { "pool-config": { "join-end": "10" } } }), {
-    "join-end": "10",
-    "prepare-start": null,
-    "cycle-end": null,
-    "reward-release": null,
-  });
 });
 
 test("owner filter matches pot-owner and deployer wallet", () => {
@@ -132,6 +123,17 @@ test("contract filter returns that pot even when owner also matches", () => {
   const rows = filterPotsForDetails(pots, { owner: OWNER, contract: POT });
   assert.equal(rows.length, 1);
   assert.equal(rows[0].potAddress, POT);
+});
+
+test("sponsorContractsForPot unique from print and live values", () => {
+  const extra = `${OWNER}.other-sponsor`;
+  const ids = sponsorContractsForPot(
+    { values: { sponsors: [{ "sponsor-contract": SPONSOR }] } },
+    { sponsors: [{ "sponsor-contract": SPONSOR }, { "sponsor-contract": extra }] },
+  );
+  assert.equal(ids.length, 2);
+  assert.ok(ids.includes(SPONSOR));
+  assert.ok(ids.includes(extra));
 });
 
 test("sponsor filter uses init-pot sponsor-contract list or tickets", () => {
@@ -173,6 +175,19 @@ test("init-pot print logs yield the logged sponsor tickets", () => {
   assert.equal(sponsors.length, 1);
   assert.equal(sponsors[0]["sponsor-contract"], SPONSOR);
   assert.equal(sponsors[0]["ticket-id"], "4");
+});
+
+test("register-pot pot-values is the same init payload as pot-registered", () => {
+  const print = initPayloadFromEvent({
+    event: "register-pot",
+    txid: "0xregister",
+    "pot-address": POT,
+    "pot-values":
+      "0x0c0000000808636f6e7472616374061a86debef2dd947196608f31e7e4ce7a171909d5cf076a61636b706f74066379636c65730100000000000000000000000000000001106d61782d7061727469636970616e747301000000000000000000000000000000640a6d696e2d616d6f756e7401000000000000000000000000017d7840056f776e6572051a86debef2dd947196608f31e7e4ce7a171909d5cf10706f742d7265776172642d746f6b656e0d00000004736274630873706f6e736f72730b000000010c000000021073706f6e736f722d636f6e7472616374061a86debef2dd947196608f31e7e4ce7a171909d5cf0b6b696e67732d7669626573097469636b65742d6964010000000000000000000000000000000104747970650d000000076a61636b706f74",
+  });
+  assert.equal(print.event, "init-pot");
+  assert.equal(print.contract, "ST23DXFQJVPA735K0HWRYFS6EF8BHJ2ENSZ3NNNMC.jackpot");
+  assert.equal(print.txid, "0xregister");
 });
 
 test("pot-registered pot-values hex is the pots-page init payload", () => {

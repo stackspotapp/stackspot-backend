@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { STACKSPOTS_EVENTS, eventDedupeId, toPublicEvent } from "./catalog.js";
+import { STACKSPOTS_EVENTS, canonicalizeEventName, eventDedupeId, isStackspotsLogType, toPublicEvent } from "./catalog.js";
 
 const HIDDEN = [
   "id",
@@ -103,4 +103,11 @@ test("unknown prints are not returned", () => {
     }),
     null,
   );
+});
+
+test("register-pot is the stackspots print name for pot-registered", () => {
+  assert.equal(canonicalizeEventName("register-pot"), "pot-registered");
+  assert.equal(isStackspotsLogType("register-pot"), true);
+  assert.equal(STACKSPOTS_EVENTS["register-pot"].source, "stackspots");
+  assert.equal(STACKSPOTS_EVENTS["pot-registered"].source, "stackspots");
 });

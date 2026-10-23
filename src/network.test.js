@@ -6,7 +6,11 @@ import {
   parseNetwork,
   resolveNetwork,
 } from "./network.js";
-import { resolveRequestContext } from "./config.js";
+import {
+  isAcceptedPrintSource,
+  platformSiblingContract,
+  resolveRequestContext,
+} from "./config.js";
 
 test("detects mainnet and testnet from principal prefixes", () => {
   assert.equal(
@@ -41,6 +45,34 @@ test("query network=testnet switches Hiro and marks source=query", () => {
   assert.equal(ctx.network, "testnet");
   assert.equal(ctx.networkSource, "query");
   assert.equal(ctx.stacksApiUrl, "https://api.testnet.hiro.so");
+  assert.equal(
+    ctx.preInitLogsContract,
+    platformSiblingContract(ctx.contract, "stackspot-pre-init-logs"),
+  );
+});
+
+test("pre-init logs sit on the platform sibling contract", () => {
+  assert.equal(
+    platformSiblingContract(
+      "ST4KKK958A2BG93J06GE9S9Q80WCCMA7QXW2AFRT.stackspots",
+      "stackspot-pre-init-logs",
+    ),
+    "ST4KKK958A2BG93J06GE9S9Q80WCCMA7QXW2AFRT.stackspot-pre-init-logs",
+  );
+  const ctx = {
+    contract: "ST4KKK958A2BG93J06GE9S9Q80WCCMA7QXW2AFRT.stackspots",
+    preInitLogsContract: "ST4KKK958A2BG93J06GE9S9Q80WCCMA7QXW2AFRT.stackspot-pre-init-logs",
+  };
+  assert.equal(isAcceptedPrintSource(ctx.preInitLogsContract, ctx), true);
+  assert.equal(isAcceptedPrintSource(ctx.contract, ctx), true);
+  assert.equal(
+    isAcceptedPrintSource("ST4KKK958A2BG93J06GE9S9Q80WCCMA7QXW2AFRT.crowd-fund", ctx),
+    false,
+  );
+  assert.equal(
+    isAcceptedPrintSource("ST4KKK958A2BG93J06GE9S9Q80WCCMA7QXW2AFRT.crowd-fund", ctx, "ST4KKK958A2BG93J06GE9S9Q80WCCMA7QXW2AFRT.crowd-fund"),
+    true,
+  );
 });
 
 test("omitted network uses the default and source=default", () => {

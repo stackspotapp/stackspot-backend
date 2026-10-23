@@ -12,6 +12,7 @@ Print wrappers from Clarity are peeled before that:
 
 - `(print (to-consensus-buff? { … }))` → `(optional (buff))` of a serialized tuple
 - `(print payload)` from `log-*` → `(buff 2048)` of a serialized tuple
+- Deploy-time `pre-init` is printed by `{platform}.stackspot-pre-init-logs` (pots no longer call `stackspots.log-pre-init`). The syncer fetches that contract in addition to `stackspots`.
 
 Nested buffer **fields** (contract hashes) stay as hex.
 
@@ -47,6 +48,7 @@ The `npm warn config production Use --omit=dev instead` line from the host is ha
 | `STACKSPOTS_CONTRACT_MAINNET` | `SP2HX…W1.stackspots` | Mainnet Stackspots `address.name` |
 | `STACKSPOTS_CONTRACT_TESTNET` | `ST1PQ…GM.stackspots` | Testnet Stackspots `address.name` |
 | `STACKSPOTS_CONTRACT` | — | Fallback mapped to mainnet or testnet from the principal prefix |
+| `STACKSPOTS_PRE_INIT_LOGS_MAINNET` / `_TESTNET` | `{platform}.stackspot-pre-init-logs` | Deploy-time `pre-init` prints (pots call this contract, not stackspots) |
 | `STACKS_API_URL` | from `NETWORK` | Optional override for the selected network |
 | `STACKS_MAINNET_API_URL` | `https://api.hiro.so` | Mainnet Hiro host |
 | `STACKS_TESTNET_API_URL` | `https://api.testnet.hiro.so` | Testnet Hiro host |

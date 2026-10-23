@@ -22,7 +22,7 @@ export const STACKSPOTS_EVENTS = {
     fields: ["event", "hash", "state"],
   },
   "pre-init": {
-    source: "pot",
+    source: "stackspot-pre-init-logs",
     kind: "pot",
     potStatus: "deployed",
     fields: [
@@ -78,6 +78,25 @@ export const STACKSPOTS_EVENTS = {
       "origin-contract-sha-hash",
       "stacks-block-height",
       "burn-block-height",
+      "pot-values",
+    ],
+  },
+  /** Clarity `stackspots.register-pot` print. Canonicalized to `pot-registered` on ingest. */
+  "register-pot": {
+    source: "stackspots",
+    kind: "pot",
+    potStatus: "joinable",
+    fields: [
+      "event",
+      "pot-id",
+      "pot-address",
+      "pot-owner",
+      "pot-deploy-fee",
+      "pot-name",
+      "origin-contract-sha-hash",
+      "stacks-block-height",
+      "burn-block-height",
+      "pot-values",
     ],
   },
   "pot mint": {
@@ -105,6 +124,22 @@ export const STACKSPOTS_EVENTS = {
     kind: "pot",
     potStatus: "joinable",
     fields: ["event", "sponsor", "amount", "sponsors-count"],
+  },
+  "start-pot": {
+    source: "pot",
+    kind: "pot",
+    potStatus: "started",
+    fields: [
+      "event",
+      "pot-starter-principal",
+      "pot-contract",
+      "pot-treasury",
+      "pot-participants",
+      "pot-value",
+      "pot-locked",
+      "pot-lock-burn-height",
+      "pot-cancelled",
+    ],
   },
   "start-stackspot-jackpot": {
     source: "pot",
@@ -241,6 +276,8 @@ export const STACKSPOTS_EVENTS = {
       "event",
       "amount",
       "cycles",
+      "logo-url",
+      "description",
       "rule-list",
       "sponsor",
       "sponsor-contract",
@@ -254,8 +291,16 @@ export const STACKSPOTS_EVENTS = {
   },
 };
 
+/** Clarity `register-pot` is the stackspots print of the pot `init-pot` buffer. */
+export function canonicalizeEventName(eventName) {
+  const name = String(eventName ?? "").trim();
+  if (name === "register-pot") return "pot-registered";
+  return name;
+}
+
 export function isStackspotsLogType(eventName) {
-  return Boolean(eventName) && Object.prototype.hasOwnProperty.call(STACKSPOTS_EVENTS, eventName);
+  const name = canonicalizeEventName(eventName);
+  return Boolean(name) && Object.prototype.hasOwnProperty.call(STACKSPOTS_EVENTS, name);
 }
 
 /** Keep only the catalog fields decoded from the print buffer. */

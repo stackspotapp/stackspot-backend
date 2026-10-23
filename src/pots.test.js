@@ -38,12 +38,16 @@ test("pre-init uses pot-contract and marks deployed", () => {
   assert.equal(record.potType, "jackpot");
 });
 
-test("init-pot, pot-registered, and pot mint mark joinable", () => {
+test("init-pot and pot mint mark joinable; register-pot does not create a pot", () => {
   assert.equal(potAddressFromValues("init-pot", { contract: POT }), POT);
   assert.equal(potRecordFromEvent({ event: "init-pot", values: { contract: POT, type: "jackpot" } }).status, "joinable");
   assert.equal(
-    potRecordFromEvent({ event: "pot-registered", values: { "pot-address": POT, "pot-id": "1" } }).status,
-    "joinable",
+    potRecordFromEvent({ event: "pot-registered", values: { "pot-address": POT, "pot-id": "1" } }),
+    null,
+  );
+  assert.equal(
+    potRecordFromEvent({ event: "register-pot", values: { "pot-address": POT, "pot-id": "1" } }),
+    null,
   );
   assert.equal(
     potRecordFromEvent({ event: "pot mint", values: { recipient: POT, "token-id": "1" } }).potId,
@@ -133,6 +137,15 @@ test("start, cancel, and claim advance status and never move backwards", () => {
   assert.equal(cancelled.status, "cancelled");
 });
 
+test("start-pot print maps to started without inferring pot type", () => {
+  const started = potRecordFromEvent({
+    event: "start-pot",
+    values: { "pot-contract": POT, "pot-locked": true },
+  });
+  assert.equal(started.status, "started");
+  assert.equal(started.potAddress, POT);
+});
+
 test("fall-back-cancel and sequential start events are mapped", () => {
   const started = potRecordFromEvent({
     event: "start-stackspot-sequential-pot",
@@ -176,5 +189,6 @@ test("isLikelyPotContract skips platform helpers and keeps pot deploys", () => {
   assert.equal(isLikelyPotContract("ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.sequential"), true);
   assert.equal(isLikelyPotContract("ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.stackspots"), false);
   assert.equal(isLikelyPotContract("ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.stackspot-sponsor"), false);
+  assert.equal(isLikelyPotContract("ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.stackspot-pre-init-logs"), false);
   assert.equal(isLikelyPotContract("ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.nft-trait"), false);
 });

@@ -14,10 +14,10 @@ export const PLATFORM_EVENTS = new Set([
 export const EVENT_STATUS = {
   "pre-init": "deployed",
   "init-pot": "joinable",
-  "pot-registered": "joinable",
   "pot mint": "joinable",
   "join-pot": "joinable",
   "join-pot-as-sponsor": "joinable",
+  "start-pot": "started",
   "start-stackspot-jackpot": "started",
   "start-stackspot-crowdfund": "started",
   "start-stackspot-sequential-pot": "started",
@@ -48,6 +48,11 @@ export function isPotEvent(eventName) {
   return Boolean(eventName) && Object.prototype.hasOwnProperty.call(EVENT_STATUS, eventName);
 }
 
+/** Stackspots `register-pot` (cached as `pot-registered`) is not a pot row. */
+export function isRegisterPotEvent(eventName) {
+  return eventName === "register-pot" || eventName === "pot-registered";
+}
+
 export function isPotContractId(value) {
   return (
     typeof value === "string" &&
@@ -64,6 +69,7 @@ const NON_POT_CONTRACT_NAMES = new Set([
   "stackspot-pots-trait",
   "nft-trait",
   "init-admin",
+  "stackspot-pre-init-logs",
   "sbtc-token",
   "sbtc-registry",
 ]);
@@ -91,10 +97,12 @@ export function potAddressFromValues(eventName, values) {
     case "init-pot":
       return firstContractId(values.contract, values["pot-treasury"], values["pot-contract"]);
     case "pot-registered":
+    case "register-pot":
     case "claim-pot-reward":
       return firstContractId(values["pot-address"], values["pot-contract"], values["pot-treasury"]);
     case "pot mint":
       return firstContractId(values.recipient, values["pot-contract"]);
+    case "start-pot":
     case "start-stackspot-jackpot":
     case "start-stackspot-crowdfund":
     case "start-stackspot-sequential-pot":
@@ -144,7 +152,7 @@ export function isInitPotRow(pot) {
   return potEventKey(pot) === "init-pot";
 }
 
-/** Owner listing: a stored `pre-init` print from the core contract, not a bare deploy. */
+/** Owner listing: a stored `pre-init` print from `stackspot-pre-init-logs` (or legacy stackspots). */
 export function isPreInitPotRow(pot) {
   return potEventKey(pot) === "pre-init";
 }
@@ -216,7 +224,9 @@ function potRecency(pot) {
 export function applyEventToPot(existing, event, stackspotsContract) {
   const print = eventPrint(event);
   const eventName = event?.event ?? print.event;
-  if (!isPotEvent(eventName) || PLATFORM_EVENTS.has(eventName)) return existing ?? null;
+  if (isRegisterPotEvent(eventName) || !isPotEvent(eventName) || PLATFORM_EVENTS.has(eventName)) {
+    return existing ?? null;
+  }
 
   const potAddress = resolvePotAddress(event, stackspotsContract);
   if (!potAddress) return existing ?? null;

@@ -5,6 +5,8 @@ import { computeStatistics } from "./stats.js";
 const POT = "ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.jackpot";
 const OTHER = "ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.crowd-fund";
 const STACKSPOTS = "ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.stackspots";
+const PRE_INIT_LOGS = "ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.stackspot-pre-init-logs";
+const OTHER_LOGGER = "ST76BJH7YKSVMYTWFVKYCY01Q6G7J43CZ7FJ9DFK.stackspot-pre-init-logs";
 const USER = "ST1SJ3DTE5DN7X54YDH5D64R3BCB6A2AG2ZQ8YPD5";
 const SPONSOR = "ST2CY5V39NHDPWSXMW9QDT3HC3GD6Q6XX4CFRK9AG";
 
@@ -15,6 +17,8 @@ test("organises pots and stats from every contract event key", () => {
         event: "pre-init",
         txId: "0xa",
         blockHeight: 10,
+        contractId: PRE_INIT_LOGS,
+        sourceContract: PRE_INIT_LOGS,
         values: { "pot-contract": POT, "pot-type": "jackpot", "pot-name": "Alpha" },
       },
       {
@@ -81,6 +85,8 @@ test("organises pots and stats from every contract event key", () => {
         event: "pre-init",
         txId: "0x10",
         blockHeight: 12,
+        contractId: PRE_INIT_LOGS,
+        sourceContract: PRE_INIT_LOGS,
         values: { "pot-contract": OTHER, "pot-type": "crowd-fund", "pot-name": "Beta" },
       },
       {
@@ -143,11 +149,11 @@ test("organises pots and stats from every contract event key", () => {
       },
     ],
     [],
-    { stackspotsContract: STACKSPOTS },
+    { stackspotsContract: STACKSPOTS, preInitLogsContract: PRE_INIT_LOGS },
   );
 
   assert.equal(stats.totals.pots, 2);
-  assert.equal(stats.totals.deployed, 0);
+  assert.equal(stats.totals.deployed, 2);
   assert.equal(stats.totals.joinable, 0);
   assert.equal(stats.totals.started, 1);
   assert.equal(stats.totals.cancelled, 1);
@@ -184,6 +190,45 @@ test("organises pots and stats from every contract event key", () => {
   const crowd = stats.pots.find((pot) => pot.potAddress === OTHER);
   assert.equal(crowd.status, "cancelled");
   assert.equal(crowd.joinable, false);
+});
+
+test("register-pot does not create pot rows", () => {
+  const stats = computeStatistics(
+    [
+      {
+        event: "pot-registered",
+        txId: "0xreg",
+        blockHeight: 1,
+        values: { "pot-address": OTHER, "pot-id": "9", "pot-deploy-fee": "500000" },
+      },
+      {
+        event: "register-pot",
+        txId: "0xreg2",
+        blockHeight: 1,
+        values: { "pot-address": OTHER, "pot-id": "9" },
+      },
+      {
+        event: "init-pot",
+        txId: "0xinit",
+        blockHeight: 2,
+        values: { contract: POT, type: "jackpot" },
+      },
+    ],
+    [
+      {
+        potAddress: OTHER,
+        status: "joinable",
+        lastEvent: "pot-registered",
+      },
+    ],
+    { stackspotsContract: STACKSPOTS },
+  );
+
+  assert.equal(stats.totals.pots, 0);
+  assert.equal(stats.totals.deployed, 0);
+  assert.equal(stats.totals.joinable, 1);
+  assert.equal(stats.totals.deployFees, "500000");
+  assert.equal(stats.pots[0].potAddress, POT);
 });
 
 test("claim yield uses max per pot and reconstructs from reward slices", () => {
@@ -236,12 +281,12 @@ test("claim yield uses max per pot and reconstructs from reward slices", () => {
   assert.equal(stats.totals.claimed, 1);
   assert.equal(stats.totals.cancelled, 0);
   assert.equal(stats.byStatus.cancelled, 0);
-  assert.equal(stats.totals.started, 1);
-  assert.equal(stats.byStatus.started, 1);
+  assert.equal(stats.totals.started, 0);
+  assert.equal(stats.byStatus.started, 0);
   assert.equal(stats.totals.yieldClaimed, "4645");
 });
 
-test("stats pot totals ignore pre-init-only deploys", () => {
+test("pre-init increments deployed; init joinable; start leaves joinable", () => {
   const PRE_ONLY = "ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.pre-only";
   const stats = computeStatistics(
     [
@@ -249,6 +294,8 @@ test("stats pot totals ignore pre-init-only deploys", () => {
         event: "pre-init",
         txId: "0xpre",
         blockHeight: 1,
+        contractId: PRE_INIT_LOGS,
+        sourceContract: PRE_INIT_LOGS,
         values: { "pot-contract": PRE_ONLY, "pot-type": "jackpot" },
       },
       {
@@ -258,7 +305,7 @@ test("stats pot totals ignore pre-init-only deploys", () => {
         values: { contract: POT, type: "jackpot" },
       },
       {
-        event: "start-stackspot-jackpot",
+        event: "start-pot",
         txId: "0xstart",
         blockHeight: 3,
         values: { "pot-contract": POT, "pot-locked": true },
@@ -271,17 +318,17 @@ test("stats pot totals ignore pre-init-only deploys", () => {
       },
     ],
     [],
-    { stackspotsContract: STACKSPOTS },
+    { stackspotsContract: STACKSPOTS, preInitLogsContract: PRE_INIT_LOGS },
   );
 
-  assert.equal(stats.totals.pots, 2);
+  assert.equal(stats.totals.pots, 1);
+  assert.equal(stats.totals.deployed, 1);
   assert.equal(stats.totals.joinable, 1);
   assert.equal(stats.totals.started, 1);
-  assert.equal(stats.totals.deployed, 0);
-  assert.ok(!stats.pots.some((p) => p.potAddress === PRE_ONLY));
+  assert.ok(stats.pots.some((p) => p.potAddress === PRE_ONLY));
 });
 
-test("joinable excludes started/locked pots; started counts claimed", () => {
+test("joinable drops on start/cancel only; started and claimed stay event-only", () => {
   const JOINABLE = "ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.open-pot";
   const LOCKED_LAG = "ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.lag-status";
   const stats = computeStatistics(
@@ -335,15 +382,15 @@ test("joinable excludes started/locked pots; started counts claimed", () => {
     { stackspotsContract: STACKSPOTS },
   );
 
-  assert.equal(stats.totals.joinable, 1);
-  assert.equal(stats.byStatus.joinable, 1);
-  assert.equal(stats.totals.started, 3);
-  assert.equal(stats.byStatus.started, 3);
+  assert.equal(stats.totals.joinable, 2);
+  assert.equal(stats.byStatus.joinable, 2);
+  assert.equal(stats.totals.started, 2);
+  assert.equal(stats.byStatus.started, 2);
   assert.equal(stats.totals.claimed, 1);
   assert.equal(stats.pots.find((p) => p.potAddress === JOINABLE).status, "joinable");
 });
 
-test("live pot-locked moves pot from joinable to started", () => {
+test("live pot-locked does not move joinable or started", () => {
   const LOCKED = "ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.blaze";
   const OPEN = "ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.open";
   const stats = computeStatistics(
@@ -378,9 +425,59 @@ test("live pot-locked moves pot from joinable to started", () => {
     { stackspotsContract: STACKSPOTS },
   );
 
+  assert.equal(stats.totals.pots, 0);
+  assert.equal(stats.totals.deployed, 0);
+  assert.equal(stats.totals.joinable, 2);
+  assert.equal(stats.totals.started, 0);
+  assert.equal(stats.byStatus.joinable, 2);
+  assert.equal(stats.byStatus.started, 0);
+});
+
+test("pots and deployed count every stackspot-pre-init-logs event and nothing else", () => {
+  const stats = computeStatistics(
+    [
+      {
+        event: "pre-init",
+        txId: "0x1",
+        blockHeight: 1,
+        contractId: PRE_INIT_LOGS,
+        sourceContract: PRE_INIT_LOGS,
+        values: { "pot-contract": POT },
+      },
+      {
+        event: "pre-init",
+        txId: "0x2",
+        blockHeight: 2,
+        contractId: PRE_INIT_LOGS,
+        sourceContract: PRE_INIT_LOGS,
+        values: { "pot-contract": POT },
+      },
+      {
+        event: "pre-init",
+        txId: "0x3",
+        blockHeight: 3,
+        contractId: OTHER_LOGGER,
+        sourceContract: OTHER_LOGGER,
+        values: { "pot-contract": OTHER },
+      },
+      {
+        event: "pre-init",
+        txId: "0x4",
+        blockHeight: 4,
+        values: { "pot-contract": OTHER },
+      },
+      {
+        event: "init-pot",
+        txId: "0x5",
+        blockHeight: 5,
+        values: { contract: POT, type: "jackpot" },
+      },
+    ],
+    [],
+    { stackspotsContract: STACKSPOTS, preInitLogsContract: PRE_INIT_LOGS },
+  );
+
   assert.equal(stats.totals.pots, 2);
-  assert.equal(stats.totals.joinable, 1);
-  assert.equal(stats.totals.started, 1);
-  assert.equal(stats.byStatus.joinable, 1);
-  assert.equal(stats.byStatus.started, 1);
+  assert.equal(stats.totals.deployed, 2);
+  assert.equal(stats.byStatus.deployed, 2);
 });

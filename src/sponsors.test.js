@@ -55,6 +55,8 @@ test("sponsor-platform attaches amount, cycles, and wallet from stackspots or th
       values: {
         amount: "40000000",
         cycles: "10",
+        "logo-url": "https://example.com/logo.png",
+        description: "kings vibes",
         sponsor: WALLET,
         "sponsor-contract": SPONSOR,
         "burn-block-height": "1000",
@@ -67,6 +69,8 @@ test("sponsor-platform attaches amount, cycles, and wallet from stackspots or th
   assert.equal(fromHub.sponsor, WALLET);
   assert.equal(fromHub.amount, "40000000");
   assert.equal(fromHub.cycles, "10");
+  assert.equal(fromHub.logoUrl, "https://example.com/logo.png");
+  assert.equal(fromHub.description, "kings vibes");
   assert.equal(fromHub.ruleList[0].label, "min-pot");
 
   const fromLocal = resolveSponsorContract(

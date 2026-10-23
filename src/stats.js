@@ -1,85 +1,94 @@
 import { eventPrint } from "./catalog.js";
+import { platformSiblingContract, PRE_INIT_LOGS_CONTRACT_NAME } from "./config.js";
 import {
   activityDedupeKey,
   applyEventToPot,
-  EVENT_STATUS,
   isPotEvent,
+  isRegisterPotEvent,
   normalizeListedPot,
+  potEventKey,
   PLATFORM_EVENTS,
   POT_STATUSES,
   resolvePotAddress,
 } from "./pots.js";
 
-const STARTED_EVENT_NAMES = Object.entries(EVENT_STATUS)
-  .filter(([, status]) => status === "started")
-  .map(([name]) => name);
-
-function potLiveValues(pot) {
-  if (pot?.live && typeof pot.live === "object" && !Array.isArray(pot.live)) return pot.live;
-  return null;
+function resolvePreInitLogsContract({ preInitLogsContract, stackspotsContract } = {}) {
+  const explicit = String(preInitLogsContract ?? "").trim();
+  if (explicit) return explicit;
+  return platformSiblingContract(stackspotsContract, PRE_INIT_LOGS_CONTRACT_NAME);
 }
 
-function truthyFlag(value) {
-  return value === true || value === "true" || value === 1 || value === "1";
+/** Pots and deployed counts: prints from `{platform}.stackspot-pre-init-logs` only. */
+export function isPreInitLogsEvent(event, preInitLogsContract) {
+  const name = event?.event ?? eventPrint(event).event;
+  if (name !== "pre-init") return false;
+  const want = String(preInitLogsContract ?? "").trim().toLowerCase();
+  if (!want) return false;
+  const source = String(event?.sourceContract ?? event?.contractId ?? "")
+    .trim()
+    .toLowerCase();
+  return source === want;
 }
 
-function potHasClaimer(pot) {
-  if (pot?.status === "claimed") return true;
-  const live = potLiveValues(pot);
-  const values = pot?.values && typeof pot.values === "object" ? pot.values : null;
-  const claimer =
-    live?.["pot-claimer-address"] ??
-    live?.potClaimerAddress ??
-    values?.["pot-claimer-address"] ??
-    values?.potClaimerAddress;
-  return claimer != null && String(claimer).trim() !== "" && String(claimer) !== "none";
+export function preInitLogsEventCount(events = [], preInitLogsContract) {
+  const want = String(preInitLogsContract ?? "").trim().toLowerCase();
+  let sourced = 0;
+  let unsourced = 0;
+  for (const event of events) {
+    const name = event?.event ?? eventPrint(event).event;
+    if (name !== "pre-init") continue;
+    const source = String(event?.sourceContract ?? event?.contractId ?? "")
+      .trim()
+      .toLowerCase();
+    if (want && source === want) sourced += 1;
+    else if (!source) unsourced += 1;
+  }
+  return sourced > 0 ? sourced : unsourced;
 }
 
-function potIsLocked(pot) {
-  const live = potLiveValues(pot);
-  const values = pot?.values && typeof pot.values === "object" ? pot.values : null;
-  if (live && truthyFlag(live["pot-locked"] ?? live.potLocked)) return true;
-  if (values && truthyFlag(values["pot-locked"] ?? values.potLocked)) return true;
-  return false;
+/** Joinable +1 on init-pot. register-pot is an alias for that print, but does not create pot rows. */
+const INIT_EVENT_NAMES = ["init-pot", "pot-registered", "register-pot"];
+const START_EVENT_NAMES = [
+  "start-pot",
+  "start-stackspot-jackpot",
+  "start-stackspot-crowdfund",
+  "start-stackspot-sequential-pot",
+];
+const CANCEL_EVENT_NAMES = ["cancel-pot", "fall-back-cancel"];
+const CLAIM_EVENT_NAMES = ["claim-pot-reward"];
+
+function potSawEvent(pot, names) {
+  const byEvent = pot?.byEvent ?? {};
+  return names.some((name) => (byEvent[name] ?? 0) > 0);
 }
 
-/** True if the pot ever reached started (including later claimed; cancel-only pots excluded). */
-function potEverStarted(pot) {
-  if (!pot) return false;
-  if (pot.status === "started" || pot.status === "claimed") return true;
-  if (potHasClaimer(pot)) return true;
-  // Live get-pot-details lock — same signal the pots page uses for "started".
-  if (potIsLocked(pot)) return true;
-  const byEvent = pot.byEvent ?? {};
-  return STARTED_EVENT_NAMES.some((name) => (byEvent[name] ?? 0) > 0);
+function potWasDeployed(pot) {
+  return potSawEvent(pot, ["pre-init"]);
 }
 
-/**
- * Currently joinable: open for joins, not started/locked/cancelled/claimed.
- * Aligns with pots UI (`!potLocked` + not claimed).
- */
+function potWasInitiated(pot) {
+  return potSawEvent(pot, INIT_EVENT_NAMES);
+}
+
+function potWasStarted(pot) {
+  return potSawEvent(pot, START_EVENT_NAMES);
+}
+
+function potWasCancelled(pot) {
+  return potSawEvent(pot, CANCEL_EVENT_NAMES);
+}
+
+function potWasClaimed(pot) {
+  return potSawEvent(pot, CLAIM_EVENT_NAMES);
+}
+
+/** Joinable = init-pot pots that have not seen start or cancel. */
 function potCurrentlyJoinable(pot) {
-  if (!pot) return false;
-  if (pot.status === "cancelled") return false;
-  if (potHasClaimer(pot)) return false;
-  if (pot.status === "claimed" || pot.status === "started") return false;
-  if (potEverStarted(pot)) return false;
-  if (potIsLocked(pot)) return false;
-  return pot.status === "joinable";
+  if (!potWasInitiated(pot)) return false;
+  if (potWasStarted(pot) || potWasCancelled(pot)) return false;
+  return true;
 }
 
-function potCurrentlyClaimed(pot) {
-  return potHasClaimer(pot);
-}
-
-/** Same universe as GET /pots: must have seen init-pot or pot-registered (not bare pre-init). */
-function potHasInitPrint(pot, initializedAddresses) {
-  if (!pot?.potAddress) return false;
-  const key = String(pot.potAddress).trim().toLowerCase();
-  if (initializedAddresses?.has(key)) return true;
-  const byEvent = pot.byEvent ?? {};
-  return (byEvent["init-pot"] ?? 0) > 0 || (byEvent["pot-registered"] ?? 0) > 0;
-}
 function asBig(value) {
   if (value == null || value === "") return 0n;
   try {
@@ -117,7 +126,12 @@ function emptyAgg() {
   };
 }
 
-export function computeStatistics(events = [], listedPots = [], { stackspotsContract } = {}) {
+export function computeStatistics(
+  events = [],
+  listedPots = [],
+  { stackspotsContract, preInitLogsContract } = {},
+) {
+  const loggerContract = resolvePreInitLogsContract({ preInitLogsContract, stackspotsContract });
   const potsMap = new Map();
   const liveByAddress = new Map();
 
@@ -136,10 +150,10 @@ export function computeStatistics(events = [], listedPots = [], { stackspotsCont
   for (const pot of listedPots) {
     const normalized = normalizeListedPot(pot);
     if (!normalized?.potAddress) continue;
+    if (isRegisterPotEvent(potEventKey(normalized))) continue;
     const key = potKey(normalized.potAddress);
     const live = pot.live ?? normalized.live ?? null;
     if (live && typeof live === "object") liveByAddress.set(key, live);
-    writePot({ ...normalized, live });
   }
 
   const byEvent = {};
@@ -159,8 +173,6 @@ export function computeStatistics(events = [], listedPots = [], { stackspotsCont
   let rewardsPaid = 0n;
   /** Max claim yield per pot — pot + stackspots prints share a tx and must not double-count. */
   const yieldByPot = new Map();
-  /** Pot contracts that received init-pot or pot-registered (excludes pre-init-only deploys). */
-  const initializedAddresses = new Set();
 
   const sorted = [...events].sort((a, b) => {
     const height = Number(a.blockHeight ?? 0) - Number(b.blockHeight ?? 0);
@@ -183,10 +195,7 @@ export function computeStatistics(events = [], listedPots = [], { stackspotsCont
     if (unique) seenActivity.add(activityDedupeKey(event));
 
     const potAddress = resolvePotAddress(event, stackspotsContract);
-    if (potAddress && (name === "init-pot" || name === "pot-registered")) {
-      initializedAddresses.add(String(potAddress).trim().toLowerCase());
-    }
-    if (potAddress && isPotEvent(name) && unique) {
+    if (potAddress && unique && (isPotEvent(name) || isRegisterPotEvent(name))) {
       const agg = aggByPot.get(potAddress) ?? emptyAgg();
       agg.byEvent[name] = (agg.byEvent[name] ?? 0) + 1;
       aggByPot.set(potAddress, agg);
@@ -282,32 +291,31 @@ export function computeStatistics(events = [], listedPots = [], { stackspotsCont
     })
     .sort((a, b) => Number(b.lastBlockHeight ?? 0) - Number(a.lastBlockHeight ?? 0));
 
-  // Lifecycle + pot totals match GET /pots: initialized pots only (init-pot / pot-registered).
-  const pots = allPots.filter((pot) => potHasInitPrint(pot, initializedAddresses));
+  // Event buckets only (no live get-pot-details):
+  // deployed +1 pre-init (never decreases);
+  // joinable +1 init-pot, −1 start, −1 cancel;
+  // started / cancelled / claimed +1 on those events only.
+  const pots = allPots;
 
   for (const pot of pots) {
     const type = pot.potType ?? "unknown";
     byType[type] = (byType[type] ?? 0) + 1;
-    const status = POT_STATUSES.includes(pot.status) ? pot.status : null;
-    if (status) byStatus[status] += 1;
   }
 
-  // Lifecycle "started" = ever started / locked (claimed pots still count).
-  byStatus.started = pots.filter(potEverStarted).length;
-  // Joinable = currently open only (exclude started/locked/claimed — matches pots UI).
+  const loggerEventCount = preInitLogsEventCount(sorted, loggerContract);
+  byStatus.deployed = loggerEventCount;
   byStatus.joinable = pots.filter(potCurrentlyJoinable).length;
-  byStatus.claimed = pots.filter(potCurrentlyClaimed).length;
+  byStatus.started = pots.filter(potWasStarted).length;
+  byStatus.cancelled = pots.filter(potWasCancelled).length;
+  byStatus.claimed = pots.filter(potWasClaimed).length;
 
-  for (const [address, amount] of yieldByPot) {
-    const key = String(address).trim().toLowerCase();
-    if (!initializedAddresses.size || initializedAddresses.has(key)) {
-      yieldClaimed += amount;
-    }
+  for (const amount of yieldByPot.values()) {
+    yieldClaimed += amount;
   }
 
   return {
     totals: {
-      pots: pots.length,
+      pots: loggerEventCount,
       deployed: byStatus.deployed,
       joinable: byStatus.joinable,
       started: byStatus.started,

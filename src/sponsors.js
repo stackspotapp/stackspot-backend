@@ -111,6 +111,8 @@ function emptySponsor(sponsorContract) {
     sponsor: null,
     amount: null,
     cycles: null,
+    logoUrl: null,
+    description: null,
     ruleList: [],
     burnBlockHeight: null,
     allowed: false,
@@ -149,6 +151,12 @@ export function applyEventToSponsor(existing, event, stackspotsContract) {
     sponsor: pickText(values.sponsor, base.sponsor),
     amount: incomingIsNewer ? pickText(values.amount, base.amount) : pickText(base.amount, values.amount),
     cycles: incomingIsNewer ? pickText(values.cycles, base.cycles) : pickText(base.cycles, values.cycles),
+    logoUrl: incomingIsNewer
+      ? pickText(values["logo-url"], values.logoUrl, base.logoUrl)
+      : pickText(base.logoUrl, values["logo-url"], values.logoUrl),
+    description: incomingIsNewer
+      ? pickText(values.description, base.description)
+      : pickText(base.description, values.description),
     ruleList:
       incomingIsNewer && Array.isArray(values["rule-list"])
         ? asRuleList(values["rule-list"])
@@ -189,6 +197,12 @@ export function mergeSponsorRecord(existing, incoming) {
     sponsor: pickText(incoming.sponsor, existing.sponsor),
     amount: incomingIsNewer ? pickText(incoming.amount, existing.amount) : pickText(existing.amount, incoming.amount),
     cycles: incomingIsNewer ? pickText(incoming.cycles, existing.cycles) : pickText(existing.cycles, incoming.cycles),
+    logoUrl: incomingIsNewer
+      ? pickText(incoming.logoUrl, existing.logoUrl)
+      : pickText(existing.logoUrl, incoming.logoUrl),
+    description: incomingIsNewer
+      ? pickText(incoming.description, existing.description)
+      : pickText(existing.description, incoming.description),
     ruleList:
       incomingIsNewer && incoming.ruleList?.length
         ? incoming.ruleList
