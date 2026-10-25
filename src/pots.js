@@ -53,6 +53,34 @@ export function isRegisterPotEvent(eventName) {
   return eventName === "register-pot" || eventName === "pot-registered";
 }
 
+function contractNameOf(contractId) {
+  return String(contractId ?? "").split(".")[1]?.toLowerCase() ?? "";
+}
+
+function sourceContractOf(event) {
+  return String(event?.sourceContract ?? event?.contractId ?? "").trim();
+}
+
+/**
+ * Joinable pots page: `init-pot` prints only (not `pot-registered`).
+ * Clarity prints `init-pot` on the pot, then `register-pot` on stackspots (no pot-registered print).
+ * Count stackspots-sourced rows and pot-local `init-pot` logs.
+ */
+export function isJoinableInitPotEvent(event, { stackspotsContract, preInitLogsContract } = {}) {
+  const print = eventPrint(event);
+  const name = String(print.event ?? event?.event ?? "").trim();
+  if (name !== "init-pot") return false;
+  const source = sourceContractOf(event).toLowerCase();
+  if (!source) return true;
+  const preInit = String(preInitLogsContract ?? "").trim().toLowerCase();
+  if (preInit && source === preInit) return false;
+  if (contractNameOf(source) === "stackspot-pre-init-logs") return false;
+  const want = String(stackspotsContract ?? "").trim().toLowerCase();
+  if (want && source === want) return true;
+  if (contractNameOf(source) === "stackspots") return true;
+  return isLikelyPotContract(sourceContractOf(event));
+}
+
 export function isPotContractId(value) {
   return (
     typeof value === "string" &&

@@ -6,6 +6,7 @@ import { apiUrlForNetwork } from "./network.js";
 import {
   areEventIdsKnown,
   forgetAllEventIds,
+  getEventsByIds,
   listEventIds,
   markFullPrintSchema,
   needsFullPrintRefetch,
@@ -165,6 +166,30 @@ export async function runSync({ full = false, network, contract } = {}) {
     } catch (error) {
       console.error(`[sync] ${ctx.network} ${ctx.preInitLogsContract}`, error.message);
     }
+  }
+
+  const { ids: preInitIds } = await listEventIds({
+    ...ctx,
+    eventName: "pre-init",
+    offset: 0,
+    limit: 1_000_000,
+  });
+  const preInitEvents = await getEventsByIds(preInitIds, ctx);
+  const potContracts = [];
+  const seenPot = new Set();
+  for (const event of preInitEvents) {
+    const id = String(event?.["pot-contract"] ?? event?.["pot-treasury"] ?? "").trim();
+    const key = id.toLowerCase();
+    if (!key || seenPot.has(key) || !isLikelyPotContract(id)) continue;
+    seenPot.add(key);
+    potContracts.push(id);
+  }
+  if (potContracts.length) {
+    console.log(`[sync] ${ctx.network} fetching init-pot from ${potContracts.length} pot contracts`);
+    const extra = await syncContracts(potContracts, ctx, { full, maxPages: 8 });
+    fetched += extra.fetched;
+    stored += extra.stored;
+    if (extra.mode) mode = extra.mode;
   }
 
   await rebuildSponsorsFromEvents(ctx);

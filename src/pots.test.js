@@ -9,6 +9,7 @@ import {
   normalizeListedPot,
   potAddressFromValues,
   potRecordFromEvent,
+  isJoinableInitPotEvent,
 } from "./pots.js";
 
 const POT = "ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.jackpot";
@@ -36,6 +37,39 @@ test("pre-init uses pot-contract and marks deployed", () => {
   assert.equal(record.potAddress, POT);
   assert.equal(record.status, "deployed");
   assert.equal(record.potType, "jackpot");
+});
+
+test("joinable pots are init-pot logs, not pot-registered", () => {
+  const PRE_INIT = "ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.stackspot-pre-init-logs";
+  const opts = { stackspotsContract: STACKSPOTS, preInitLogsContract: PRE_INIT };
+  assert.equal(
+    isJoinableInitPotEvent(
+      { event: "init-pot", sourceContract: STACKSPOTS, contract: POT },
+      opts,
+    ),
+    true,
+  );
+  assert.equal(
+    isJoinableInitPotEvent(
+      { event: "init-pot", sourceContract: POT, contract: POT },
+      opts,
+    ),
+    true,
+  );
+  assert.equal(
+    isJoinableInitPotEvent(
+      { event: "pot-registered", sourceContract: STACKSPOTS, "pot-address": POT },
+      opts,
+    ),
+    false,
+  );
+  assert.equal(
+    isJoinableInitPotEvent(
+      { event: "init-pot", sourceContract: PRE_INIT, contract: POT },
+      opts,
+    ),
+    false,
+  );
 });
 
 test("init-pot and pot mint mark joinable; register-pot does not create a pot", () => {
