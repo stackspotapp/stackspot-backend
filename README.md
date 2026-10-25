@@ -72,6 +72,7 @@ The `npm warn config production Use --omit=dev instead` line from the host is ha
 | `GET` | `/sponsors` | Cached `sponsor-platform` prints (decoded fields + `txid`) |
 | `GET` | `/sponsors/:address` | That sponsor print plus cached events (`address` is `sponsor-contract` or wallet) |
 | `GET` | `/stats` | Same as pots, plus join/stake/claim totals (`/pots/stats` alias) |
+| `GET` | `/users/:address` | Wallet profile from cached prints: created / joined / sponsored / won pots + `contributedUstx` (`/profile/:address` alias). `?network=` |
 | `GET`/`POST` | `/contracts/:address/:name/:function` | Read-only call on that contract |
 | `GET`/`POST` | `/contracts/:address.name/:function` | Same, `ADDRESS.NAME` + function |
 | `GET`/`POST` | `/contracts/:address/:name` | Same, function via `?function=` (default `get-pot-details`) |

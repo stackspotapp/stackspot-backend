@@ -45,6 +45,7 @@ import {
   parseOptionalPrincipal,
 } from "./potDetails.js";
 import { computeStatistics } from "./stats.js";
+import { computeUserProfile, loadUserProfileEvents } from "./userProfile.js";
 import { runSyncAll, runSyncSafe } from "./sync.js";
 
 function potContractOf(print) {
@@ -202,6 +203,7 @@ app.get("/catalog", (req, res, next) => {
         pots: "GET /pots defaults to initialized pots only (excludes pre-init), sorted latest→oldest by Stacks block height. Pass ?event= or ?status= to override. Pot live is the get-pot-details tuple; each reload also calls get-sponsor-details for that pot's platform sponsors and caches those rows on the sponsor.",
         sponsors: "GET /sponsors returns cached sponsor-platform prints: decoded fields (including logo-url and description), txid, project-name, and live get-sponsor-details. Pass ?refresh=1 to re-read sponsor contracts. Pot refresh writes the same live tuple onto each sponsor cache key and onto the pot as platform-sponsors.",
         network: "Pass ?network=mainnet or ?network=testnet to select STACKSPOTS_CONTRACT_MAINNET / STACKSPOTS_CONTRACT_TESTNET, Hiro host, and Redis namespace. Pre-init prints are synced from `{platform}.stackspot-pre-init-logs` (override with STACKSPOTS_PRE_INIT_LOGS_*).",
+        users: "GET /users/:address (alias /profile/:address) returns created (pre-init sender on stackspot-pre-init-logs), joined (join-pot sender on stackspots), sponsored (join-pot-as-sponsor sender on stackspots), won (claim-pot-reward winners-values participant on stackspots), contributedUstx, and the pot lists. Pass ?network=.",
       },
     });
   } catch (error) {
@@ -680,6 +682,30 @@ async function statsHandler(req, res, next) {
 
 app.get("/stats", statsHandler);
 app.get("/pots/stats", statsHandler);
+
+async function userProfileHandler(req, res, next) {
+  try {
+    const ctx = requestContext(req);
+    requireContract(ctx);
+    const address = parseOptionalPrincipal(req.params.address ?? req.query.address, "address");
+    if (!address) {
+      const error = new Error("Pass a Stacks address in the path or ?address=");
+      error.status = 400;
+      throw error;
+    }
+    const events = await loadUserProfileEvents(ctx);
+    const profile = computeUserProfile(events, address, {
+      stackspotsContract: ctx.contract,
+      preInitLogsContract: ctx.preInitLogsContract,
+    });
+    res.json({ ...networkEnvelope(ctx), ...profile });
+  } catch (error) {
+    next(error);
+  }
+}
+
+app.get("/users/:address", userProfileHandler);
+app.get("/profile/:address", userProfileHandler);
 
 function parseArgsInput(raw) {
   if (raw == null || raw === "") return [];
