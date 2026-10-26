@@ -8,6 +8,7 @@ import {
   initPayloadFromEvent,
   initPotPrintForPot,
   initPotPrintsForSponsor,
+  mergePotLiveWithDeployed,
   potMatchesOwner,
   potMatchesSponsor,
   potsSponsoredBy,
@@ -111,6 +112,31 @@ test("pot details keep only values decoded from result hex", () => {
   assert.equal(extracted.owner, undefined);
   assert.equal(extracted.function, undefined);
   assert.equal(extracted.args, undefined);
+});
+
+test("live overlay keeps deployed min/max when get-pot-details omits them", () => {
+  const merged = mergePotLiveWithDeployed(
+    {
+      "pot-min-amount": "100000000",
+      "pot-max-participants": "0",
+      "min-amount": "100000000",
+      "max-participants": "50",
+      "pot-cycle": "1",
+      "pot-name": "Winners",
+    },
+    {
+      "pot-value": "0",
+      "pot-participants-count": "0",
+      "is-initiated": true,
+      "pot-locked": false,
+    },
+  );
+  assert.equal(merged["pot-min-amount"], "100000000");
+  assert.equal(merged["pot-max-participants"], "50");
+  assert.equal(merged["pot-cycle"], "1");
+  assert.equal(merged["pot-name"], "Winners");
+  assert.equal(merged["is-initiated"], true);
+  assert.equal(merged["pot-value"], "0");
 });
 
 test("owner filter matches pot-owner and deployer wallet", () => {

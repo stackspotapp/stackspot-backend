@@ -1,4 +1,4 @@
-import { getCachedContract, getSponsorLives, setCachedContract, setPotLive, setSponsorLive } from "./cache.js";
+import { getCachedContract, getPot, getSponsorLives, setCachedContract, setPotLive, setSponsorLive } from "./cache.js";
 import { eventPrint, eventTxId, toPublicEvent } from "./catalog.js";
 import { config } from "./config.js";
 import { decodeClarityResult, decodePrintHex, expandEncodedValues } from "./decoder.js";
@@ -27,6 +27,44 @@ function walletOf(contractId) {
 function asTrimmed(value) {
   const text = String(value ?? "").trim();
   return text || null;
+}
+
+function printConfigValue(print, keys) {
+  if (!print || typeof print !== "object") return undefined;
+  for (const key of keys) {
+    if (configPresent(print[key])) return print[key];
+  }
+  return undefined;
+}
+
+function configPresent(value) {
+  if (value == null || value === "") return false;
+  if (typeof value === "boolean") return true;
+  const n = Number(value);
+  if (Number.isFinite(n) && n === 0) return false;
+  return true;
+}
+
+/**
+ * Live `get-pot-details` has treasury/lock/init. Min/max/cycle/name live on
+ * the pre-init or init-pot print (Clarity tuple does not return them).
+ */
+export function mergePotLiveWithDeployed(print, live) {
+  const deployed = {
+    "pot-min-amount": printConfigValue(print, ["pot-min-amount", "min-amount"]),
+    "pot-max-participants": printConfigValue(print, ["pot-max-participants", "max-participants"]),
+    "pot-cycle": printConfigValue(print, ["pot-cycle", "pot-cycles", "cycles"]),
+    "pot-name": printConfigValue(print, ["pot-name", "name"]),
+    "pot-type": printConfigValue(print, ["pot-type", "type"]),
+  };
+  const chain = live && typeof live === "object" && !Array.isArray(live) ? live : {};
+  const merged = { ...Object.fromEntries(Object.entries(deployed).filter(([, v]) => configPresent(v))), ...chain };
+  for (const key of ["pot-min-amount", "pot-max-participants", "pot-cycle", "pot-name", "pot-type"]) {
+    if (!configPresent(merged[key]) && configPresent(deployed[key])) {
+      merged[key] = deployed[key];
+    }
+  }
+  return merged;
 }
 
 export function parseOptionalContractId(raw, label) {
@@ -610,11 +648,19 @@ export async function loadLivePotDetails({
     );
     if (mine && mine["rules-score"] != null) values["rules-score"] = mine["rules-score"];
   }
-  if (Object.keys(values).length > 0) {
-    await setPotLive(target, values, ctx);
+  const listed = await getPot(target, ctx).catch(() => null);
+  const print = {
+    ...(pot && typeof pot === "object" ? pot : {}),
+    ...(pot?.values && typeof pot.values === "object" ? pot.values : {}),
+    ...(listed && typeof listed === "object" ? listed : {}),
+    ...(listed?.values && typeof listed.values === "object" ? listed.values : {}),
+  };
+  const merged = mergePotLiveWithDeployed(print, values);
+  if (Object.keys(merged).length > 0) {
+    await setPotLive(target, merged, ctx);
   }
   return {
-    values,
+    values: merged,
     hasDecoded: Object.keys(values).length > 0,
   };
 }
@@ -665,7 +711,7 @@ export async function collectPotDetails({
     const pot = limited[index];
     const print = pot?.values && typeof pot.values === "object" ? pot.values : {};
     if (!row.hasDecoded && pot?.lastEvent !== "pre-init") return [];
-    const values = row.hasDecoded ? row.values : print;
+    const values = row.hasDecoded ? mergePotLiveWithDeployed(print, row.values) : print;
     return [{
       ...values,
       "pot-contract": pot?.potAddress ?? values["pot-contract"] ?? null,

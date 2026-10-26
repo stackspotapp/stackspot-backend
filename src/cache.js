@@ -294,14 +294,18 @@ export async function releaseUnstoredEventIds(ctx = {}) {
   return missing.length;
 }
 
-/** A fuller re-decode changes the print hash. Drop the older row for the same tx and event. */
+/**
+ * Drop a re-decoded copy of the same print (same tx + same payload hash).
+ * Do not drop a second `sponsor-platform` (or any other) print in that tx.
+ */
 async function dropStalePrintSiblings(redis, keys, id, payload, contract) {
+  const keepId = eventDedupeId(payload);
   const txid = txIdKey(payload?.txid);
   const name = payload?.event;
   if (!txid || !name) return;
   const ids = await redis.zRange(keys.byEvent(name), 0, -1);
   for (const other of ids) {
-    if (other === id) continue;
+    if (other === id || (keepId && other === keepId)) continue;
     if (txIdKey(String(other).split(":")[0]) !== txid) continue;
     let stored = null;
     try {
@@ -310,6 +314,8 @@ async function dropStalePrintSiblings(redis, keys, id, payload, contract) {
     } catch {
       stored = null;
     }
+    const otherId = stored ? eventDedupeId(toPublicEvent(stored) ?? stored) : null;
+    if (keepId && otherId && otherId !== keepId) continue;
     await unindexEvent(redis, keys, other, stored ?? payload, contract);
   }
 }
