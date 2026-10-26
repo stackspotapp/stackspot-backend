@@ -6,7 +6,6 @@ import { STACKSPOTS_EVENTS, toPublicEvent } from "./catalog.js";
 import {
   sponsorContractFromTicket,
   selectSponsorPlatformPrints,
-  uniqueSponsorPlatformByContract,
   withProjectName,
 } from "./sponsors.js";
 import {
@@ -502,11 +501,17 @@ app.get("/sponsors", async (req, res, next) => {
   try {
     const ctx = requestContext(req);
     requireContract(ctx);
-    // Hub `.stackspots` sponsor-platform prints (logo-url / description live here, not on live state).
-    const sponsors = uniqueSponsorPlatformByContract(
-      await loadSponsorPlatformEvents(ctx),
-      ctx.contract,
-    ).map((row) => printPayload(row));
+    // Every hub `.stackspots` sponsor-platform print — do not collapse to latest contract.
+    const seenTx = new Set();
+    const sponsors = selectSponsorPlatformPrints(await loadSponsorPlatformEvents(ctx))
+      .filter((row) => {
+        const txid = row?.txid;
+        if (!txid) return true;
+        if (seenTx.has(txid)) return false;
+        seenTx.add(txid);
+        return true;
+      })
+      .map((row) => printPayload(row));
     const refresh = req.query.refresh === "1" || req.query.refresh === "true";
     const withLive = await attachSponsorContractLives(sponsors, ctx, { refresh });
     res.json({ ...networkEnvelope(ctx), sponsors: withLive, total: withLive.length });

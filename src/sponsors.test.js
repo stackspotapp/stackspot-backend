@@ -282,6 +282,10 @@ test("lookup keeps hub sponsor-platform prints filtered by sponsor-contract", ()
   assert.equal(listed.length, 2);
   assert.equal(listed[0]["sponsor-contract"], other);
   assert.equal(listed[0]["logo-url"], "https://stackspot.app/icons/logo.png");
+  const allHub = selectSponsorPlatformPrints(rows, { hubContract: STACKSPOTS });
+  assert.equal(allHub.length, 2);
+  assert.equal(allHub[0].txid, "0xhub-other");
+  assert.equal(allHub[1].txid, "0xhub");
   const hit = selectSponsorPlatformPrints(rows, {
     hubContract: STACKSPOTS,
     sponsorContract: SPONSOR,
@@ -289,4 +293,27 @@ test("lookup keeps hub sponsor-platform prints filtered by sponsor-contract", ()
   assert.equal(hit.length, 1);
   assert.equal(hit[0].txid, "0xhub");
   assert.equal(hit[0]["logo-url"], "https://example.com/logo.png");
+});
+
+test("sponsor page lists every hub sponsor-platform print, including the same contract twice", () => {
+  const rows = [
+    {
+      event: "sponsor-platform",
+      sourceContract: STACKSPOTS,
+      "sponsor-contract": SPONSOR,
+      "logo-url": "https://example.com/b.png",
+      txid: "0xsecond",
+    },
+    {
+      event: "sponsor-platform",
+      sourceContract: STACKSPOTS,
+      "sponsor-contract": SPONSOR,
+      "logo-url": "https://example.com/a.png",
+      txid: "0xfirst",
+    },
+  ];
+  const listed = selectSponsorPlatformPrints(rows, { hubContract: STACKSPOTS });
+  assert.equal(listed.length, 2);
+  assert.equal(listed[0].txid, "0xsecond");
+  assert.equal(listed[1].txid, "0xfirst");
 });
