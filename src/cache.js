@@ -1,6 +1,6 @@
 import { createClient } from "redis";
 import { eventDedupeId, eventPrint, toPublicEvent } from "./catalog.js";
-import { config } from "./config.js";
+import { config, platformSiblingContract, PRE_INIT_LOGS_CONTRACT_NAME } from "./config.js";
 import { fetchTransaction } from "./hiro.js";
 import { apiUrlForNetwork } from "./network.js";
 import {
@@ -325,6 +325,31 @@ function sameStoredPayload(stored, payload) {
   return left.every((key, index) => key === right[index] && JSON.stringify(stored[key]) === JSON.stringify(payload[key]));
 }
 
+function printSourceRank(source, ctx = {}) {
+  const src = String(source ?? "").trim().toLowerCase();
+  if (!src) return 0;
+  const contract = String(ctx.contract ?? "").trim().toLowerCase();
+  const preInit = String(
+    ctx.preInitLogsContract ?? platformSiblingContract(ctx.contract, PRE_INIT_LOGS_CONTRACT_NAME) ?? "",
+  )
+    .trim()
+    .toLowerCase();
+  const name = src.split(".")[1] ?? "";
+  if (src === preInit || name === "stackspot-pre-init-logs") return 3;
+  if (src === contract || name === "stackspots") return 2;
+  return 1;
+}
+
+function preferLoggerSource(existing, incoming, ctx = {}) {
+  if (!existing) return incoming;
+  const name = String(incoming?.event ?? existing?.event ?? "").trim();
+  if (name !== "pre-init") return incoming;
+  if (printSourceRank(existing.sourceContract, ctx) >= printSourceRank(incoming.sourceContract, ctx)) {
+    return { ...incoming, sourceContract: existing.sourceContract };
+  }
+  return incoming;
+}
+
 export async function compactStoredEvents(ctx = {}) {
   const redis = getRedis();
   const { keys, network } = scope(ctx);
@@ -471,23 +496,27 @@ export async function saveEvents(events, ctx = {}) {
       continue;
     }
     const existingRaw = await redis.get(keys.event(id));
+    let existing = null;
     if (existingRaw) {
       try {
-        if (sameStoredPayload(JSON.parse(existingRaw), payload)) {
-          written.add(id);
-          if (sourceId !== id) {
-            await redis.sAdd(keys.ids, sourceId);
-            await redis.set(keys.alias(sourceId), id);
-          }
-          continue;
-        }
+        existing = JSON.parse(existingRaw);
       } catch {
-        // replace a corrupt row
+        existing = null;
       }
+    }
+    const payloadToStore =
+      payload.event === "pre-init" ? preferLoggerSource(existing, payload, ctx) : payload;
+    if (existing && sameStoredPayload(existing, payloadToStore)) {
+      written.add(id);
+      if (sourceId !== id) {
+        await redis.sAdd(keys.ids, sourceId);
+        await redis.set(keys.alias(sourceId), id);
+      }
+      continue;
     }
     const score = eventScore(event);
     const multi = redis.multi();
-    multi.set(keys.event(id), JSON.stringify(payload));
+    multi.set(keys.event(id), JSON.stringify(payloadToStore));
     if (ttl) multi.expire(keys.event(id), ttl);
     multi.zAdd(keys.events, { score, value: id });
     multi.sAdd(keys.ids, id);

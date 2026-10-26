@@ -5,6 +5,7 @@ import {
   isInitPotRow,
   isLikelyPotContract,
   isPreInitPotRow,
+  isPreInitPrintSource,
   mergePotRecord,
   normalizeListedPot,
   potAddressFromValues,
@@ -14,6 +15,16 @@ import {
 
 const POT = "ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.jackpot";
 const STACKSPOTS = "ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.stackspots";
+
+test("pre-init source accepts logger and pot-local prints", () => {
+  const PRE_INIT = "ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.stackspot-pre-init-logs";
+  const opts = { stackspotsContract: STACKSPOTS, preInitLogsContract: PRE_INIT };
+  assert.equal(isPreInitPrintSource(PRE_INIT, opts), true);
+  assert.equal(isPreInitPrintSource(POT, opts), true);
+  assert.equal(isPreInitPrintSource("", opts), true);
+  assert.equal(isPreInitPrintSource(STACKSPOTS, opts), false);
+  assert.equal(isPreInitPrintSource("ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.sbtc-token", opts), false);
+});
 
 test("init-pot and pre-init row helpers", () => {
   assert.equal(isInitPotRow({ lastEvent: "init-pot" }), true);

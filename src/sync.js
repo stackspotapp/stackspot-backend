@@ -184,12 +184,37 @@ export async function runSync({ full = false, network, contract } = {}) {
     seenPot.add(key);
     potContracts.push(id);
   }
+  const synced = new Set(
+    [ctx.contract, ctx.preInitLogsContract].filter(Boolean).map((id) => String(id)),
+  );
   if (potContracts.length) {
     console.log(`[sync] ${ctx.network} fetching init-pot from ${potContracts.length} pot contracts`);
-    const extra = await syncContracts(potContracts, ctx, { full, maxPages: 8 });
+    const extra = await syncContracts(potContracts, ctx, { full, maxPages: 8, synced });
     fetched += extra.fetched;
     stored += extra.stored;
     if (extra.mode) mode = extra.mode;
+  }
+
+  const platformOwner = String(ctx.contract ?? "").split(".")[0];
+  if (platformOwner) {
+    try {
+      console.log(`[sync] ${ctx.network} fetching deployed contracts for ${platformOwner}`);
+      const owner = await syncOwnerDeployedPots(platformOwner, ctx, {
+        full,
+        maxPages: 8,
+        synced,
+      });
+      fetched += owner.fetched;
+      stored += owner.stored;
+      if (owner.mode) mode = owner.mode;
+      if (owner.contracts?.length) {
+        console.log(
+          `[sync] ${ctx.network} owner deploys stored ${owner.stored}/${owner.fetched} (${owner.contracts.length} contracts)`,
+        );
+      }
+    } catch (error) {
+      console.error(`[sync] ${ctx.network} owner deploys ${platformOwner}`, error.message);
+    }
   }
 
   await rebuildSponsorsFromEvents(ctx);

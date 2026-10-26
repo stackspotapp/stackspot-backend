@@ -110,6 +110,20 @@ export function isLikelyPotContract(value) {
   return true;
 }
 
+/**
+ * Pre-init is printed on the pot and again on stackspot-pre-init-logs.
+ * Redis keeps one row; sourceContract may be the pot after the second sync.
+ */
+export function isPreInitPrintSource(source, { preInitLogsContract } = {}) {
+  const src = String(source ?? "").trim().toLowerCase();
+  if (!src) return true;
+  const logs = String(preInitLogsContract ?? "").trim().toLowerCase();
+  if (logs && src === logs) return true;
+  const name = src.split(".")[1] ?? "";
+  if (name === "stackspot-pre-init-logs") return true;
+  return isLikelyPotContract(source);
+}
+
 function firstContractId(...candidates) {
   for (const value of candidates) {
     if (isPotContractId(value)) return value;

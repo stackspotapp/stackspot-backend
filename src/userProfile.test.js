@@ -105,6 +105,28 @@ test("computeUserProfile uses logger source + sender / winner participant", () =
   assert.equal(profile.won[0].winnerAddress, USER);
 });
 
+test("created pots still match when Redis source is the pot-local pre-init print", () => {
+  const profile = computeUserProfile(
+    [
+      {
+        event: "pre-init",
+        txid: "0xpot-local",
+        sourceContract: POT,
+        sender: USER,
+        "pot-owner": USER,
+        "pot-contract": POT,
+        "pot-name": "Alpha",
+        "pot-type": "jackpot",
+      },
+    ],
+    USER,
+    opts,
+  );
+  assert.equal(profile.totals.created, 1);
+  assert.equal(profile.created[0].contract, POT);
+  assert.equal(profile.created[0].sender, USER);
+});
+
 test("join-pot still counts when only the stackspots print is cached", () => {
   const profile = computeUserProfile(
     [

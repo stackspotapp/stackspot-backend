@@ -44,7 +44,7 @@ import {
   sponsorsFromPrintLogs,
   parseOptionalPrincipal,
 } from "./potDetails.js";
-import { isJoinableInitPotEvent } from "./pots.js";
+import { isJoinableInitPotEvent, isPreInitPrintSource } from "./pots.js";
 import { computeStatistics } from "./stats.js";
 import { computeUserProfile, loadUserProfileEvents } from "./userProfile.js";
 import { runSyncAll, runSyncSafe } from "./sync.js";
@@ -329,7 +329,11 @@ async function potDetailsHandler(req, res, next) {
     const wantSponsor = String(sponsorContract ?? "").trim().toLowerCase();
     const seenPots = new Set();
     const pots = (await getEventsByIds(ids, ctx))
-      .filter((event) => isAcceptedPrintSource(event?.sourceContract, ctx))
+      .filter((event) =>
+        isPreInitPrintSource(event?.sourceContract, {
+          preInitLogsContract: ctx.preInitLogsContract,
+        }),
+      )
       .filter((event) => {
         const potAddress = event?.["pot-contract"] ?? event?.["pot-treasury"] ?? event?.contract;
         const key = String(potAddress ?? "").trim().toLowerCase();
@@ -485,12 +489,9 @@ app.get("/sponsors", async (req, res, next) => {
       limit: 1_000_000,
     });
     const seenTx = new Set();
-    const core = String(ctx.contract ?? "").trim().toLowerCase();
     const sponsors = (await getEventsByIds(ids, ctx))
       .map(withProjectName)
       .filter((row) => {
-        const source = String(row?.sourceContract ?? "").trim().toLowerCase();
-        if (source && core && source !== core) return false;
         const txid = row?.txid;
         if (!txid || seenTx.has(txid)) return false;
         seenTx.add(txid);

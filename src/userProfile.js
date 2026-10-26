@@ -1,7 +1,7 @@
 import { eventPrint, eventTxId } from "./catalog.js";
 import { getEventsByIds, listEventIds } from "./cache.js";
 import { PRE_INIT_LOGS_CONTRACT_NAME, platformSiblingContract } from "./config.js";
-import { isLikelyPotContract, resolvePotAddress } from "./pots.js";
+import { isLikelyPotContract, isPreInitPrintSource, resolvePotAddress } from "./pots.js";
 
 /** Profile categories come from these logger prints only. */
 export const USER_PROFILE_EVENT_NAMES = [
@@ -191,7 +191,10 @@ export function computeUserProfile(events = [], address, stackspotsContractOrOpt
     const name = String(print.event ?? event.event ?? "").trim();
     const contract = userPotContract(event, stackspotsContract);
 
-    if (name === "pre-init" && fromLogger(event, preInitLogsContract)) {
+    if (
+      name === "pre-init" &&
+      isPreInitPrintSource(sourceContractOf(event), { preInitLogsContract })
+    ) {
       const sender = print.sender ?? print["tx-sender"] ?? print["pot-owner"];
       if (sameUserAddress(sender, want) && contract) {
         upsertByContract(created, contract, rowFromEvent(event, {
