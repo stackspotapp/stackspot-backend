@@ -9,6 +9,7 @@ import { fetchTransaction, normalizeLog } from "./hiro.js";
 import { printPayload } from "./http.js";
 import { loadLivePotDetails, sponsorsFromPrintLogs } from "./potDetails.js";
 import { isJoinableInitPotEvent } from "./pots.js";
+import { mergeSponsorTickets } from "./sponsors.js";
 
 export function potContractOf(print) {
   return (
@@ -83,15 +84,15 @@ export async function ensurePotLive(prints, ctx, { refresh = false, sponsorContr
 export async function attachInitPotTickets(prints, ctx) {
   const out = [];
   for (const print of prints) {
-    if (Array.isArray(print.sponsors) && print.sponsors.length) {
+    if (Array.isArray(print.sponsors) && print.sponsors.length > 1) {
       out.push(print);
       continue;
     }
     try {
       const tx = await fetchTransaction(print.txid, ctx.stacksApiUrl);
       const logs = (tx?.events ?? []).map((item) => normalizeLog(item, print.contract));
-      const sponsors = sponsorsFromPrintLogs(logs, print.contract);
-      if (Array.isArray(sponsors)) {
+      const sponsors = mergeSponsorTickets(print.sponsors, sponsorsFromPrintLogs(logs, print.contract));
+      if (sponsors.length) {
         await setStoredInitPotSponsors(print.txid, print.contract, sponsors, ctx);
         out.push({ ...print, sponsors });
         continue;

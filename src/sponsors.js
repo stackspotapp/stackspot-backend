@@ -15,29 +15,74 @@ export function isSponsorContractId(value) {
   return isPotContractId(value);
 }
 
+function clarityTypeName(row) {
+  return String(row?.type ?? "").toLowerCase();
+}
+
+function isResponseErr(row) {
+  const type = clarityTypeName(row);
+  return row?.ok === false || type === "err" || type === "responseerr" || type === "responserror";
+}
+
+function isWrappedClarity(row) {
+  const type = clarityTypeName(row);
+  return (
+    row?.ok === true ||
+    type === "response" ||
+    type === "ok" ||
+    type === "responseok" ||
+    type === "tuple" ||
+    type === "optional" ||
+    type === "some"
+  );
+}
+
+export function sponsorTicketRows(list) {
+  if (Array.isArray(list)) return list;
+  if (list && typeof list === "object" && Array.isArray(list.value)) return list.value;
+  return [];
+}
+
+function principalId(value) {
+  if (typeof value === "string") return value.trim();
+  if (value && typeof value === "object") {
+    if (typeof value.value === "string") return value.value.trim();
+    if (typeof value.value === "object") return principalId(value.value);
+  }
+  return "";
+}
+
 /** Flatten `(ok {sponsor-contract, ticket-id})` printed by init-pot. */
 export function unwrapSponsorTicket(row) {
-  if (row == null || typeof row !== "object" || Array.isArray(row)) return null;
-  if (row.ok === false) return null;
-  if (
-    (row.ok === true || row.type === "response") &&
-    row.value &&
-    typeof row.value === "object" &&
-    !Array.isArray(row.value)
-  ) {
-    return unwrapSponsorTicket(row.value);
+  if (typeof row === "string") {
+    const id = row.trim();
+    return id.includes(".") ? { "sponsor-contract": id } : null;
   }
-  if (row.type === "tuple" && row.value && typeof row.value === "object" && !Array.isArray(row.value)) {
-    return unwrapSponsorTicket(row.value);
+  if (row == null || typeof row !== "object") return null;
+  if (Array.isArray(row)) return null;
+  if (isResponseErr(row)) return null;
+  const inner = row.value;
+  if (inner && typeof inner === "object" && !Array.isArray(inner) && isWrappedClarity(row)) {
+    return unwrapSponsorTicket(inner);
+  }
+  if (
+    inner &&
+    typeof inner === "object" &&
+    !Array.isArray(inner) &&
+    row["sponsor-contract"] == null &&
+    inner["sponsor-contract"] != null
+  ) {
+    return unwrapSponsorTicket(inner);
   }
   return row;
 }
 
 export function sponsorContractFromTicket(row) {
+  if (typeof row === "string") return isSponsorContractId(row) ? String(row).trim() : null;
   const ticket = unwrapSponsorTicket(row);
   if (!ticket) return null;
-  const id = ticket["sponsor-contract"] ?? ticket.sponsorContract ?? ticket.contract;
-  return isSponsorContractId(id) ? String(id) : null;
+  const id = principalId(ticket["sponsor-contract"] ?? ticket.sponsorContract ?? ticket.contract);
+  return isSponsorContractId(id) ? id : null;
 }
 
 export function ticketIdFromTicket(row) {
@@ -48,8 +93,26 @@ export function ticketIdFromTicket(row) {
 }
 
 export function normalizeSponsorTickets(list) {
-  if (!Array.isArray(list)) return list;
-  return list.map(unwrapSponsorTicket).filter(Boolean);
+  const rows = sponsorTicketRows(list);
+  if (!rows.length && !Array.isArray(list) && !(list && Array.isArray(list.value))) return list;
+  return rows.map(unwrapSponsorTicket).filter(Boolean);
+}
+
+/** Unique platform-sponsor tickets across init-pot prints for the same pot. */
+export function mergeSponsorTickets(...lists) {
+  const seen = new Set();
+  const out = [];
+  for (const list of lists) {
+    for (const raw of sponsorTicketRows(list)) {
+      const row = unwrapSponsorTicket(raw);
+      const id = sponsorContractFromTicket(row ?? raw);
+      const key = id ? id.toLowerCase() : row ? JSON.stringify(row) : "";
+      if (!key || seen.has(key)) continue;
+      seen.add(key);
+      out.push(row ?? raw);
+    }
+  }
+  return out;
 }
 
 function firstContractId(...candidates) {

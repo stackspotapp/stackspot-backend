@@ -8,6 +8,7 @@ import { networkFromPrincipal } from "./network.js";
 import { isPotContractId, isPreInitPotRow, normalizeListedPot } from "./pots.js";
 import {
   isSponsorContractId,
+  mergeSponsorTickets,
   normalizeSponsorTickets,
   sponsorContractFromTicket,
   ticketIdFromTicket,
@@ -160,15 +161,23 @@ function rememberBinding(byPot, potAddress, extra) {
 
 function sponsorsFromDecoded(values) {
   if (!values || typeof values !== "object" || Array.isArray(values)) return null;
-  if (Array.isArray(values.sponsors)) return values.sponsors;
+  const listed = normalizeSponsorTickets(values.sponsors);
+  if (Array.isArray(listed) && listed.length) return listed;
   const nested = values["pot-values"];
-  if (typeof nested !== "string" || !nested.startsWith("0x")) return null;
-  const inner = decodePrintHex(nested);
-  return Array.isArray(inner.values?.sponsors) ? inner.values.sponsors : null;
+  if (typeof nested === "string" && nested.startsWith("0x")) {
+    const inner = decodePrintHex(nested);
+    const innerList = normalizeSponsorTickets(inner.values?.sponsors);
+    if (Array.isArray(innerList) && innerList.length) return innerList;
+  } else if (nested && typeof nested === "object") {
+    const innerList = normalizeSponsorTickets(nested.sponsors);
+    if (Array.isArray(innerList) && innerList.length) return innerList;
+  }
+  return null;
 }
 
 /** Tickets logged on an init-pot print, or inside a pot-registered pot-values buffer. */
 export function sponsorsFromPrintLogs(logs, potContract) {
+  let best = null;
   for (const log of logs ?? []) {
     const decoded = decodePrintHex(log?.hex);
     if (!decoded.values) continue;
@@ -179,9 +188,10 @@ export function sponsorsFromPrintLogs(logs, potContract) {
       continue;
     }
     const sponsors = sponsorsFromDecoded(decoded.values);
-    if (Array.isArray(sponsors)) return sponsors;
+    if (!Array.isArray(sponsors) || !sponsors.length) continue;
+    if (!best || sponsors.length > best.length) best = sponsors;
   }
-  return null;
+  return best;
 }
 
 function loggedInitPot(event) {
@@ -226,16 +236,20 @@ export function initPotPrintForPot(events, potAddress) {
   const want = String(potAddress ?? "").trim().toLowerCase();
   if (!want) return null;
   let match = null;
+  const lists = [];
   for (const event of events ?? []) {
     const logged = loggedInitPot(event);
     if (!logged) continue;
     const contract = String(logged.contract ?? logged["pot-treasury"] ?? "").trim().toLowerCase();
     if (contract !== want) continue;
-    if (!match || (Array.isArray(logged.sponsors) && logged.sponsors.length && !match.sponsors?.length)) {
-      match = logged;
-    }
+    if (Array.isArray(logged.sponsors) && logged.sponsors.length) lists.push(logged.sponsors);
+    const nextLen = Array.isArray(logged.sponsors) ? logged.sponsors.length : 0;
+    const matchLen = Array.isArray(match?.sponsors) ? match.sponsors.length : 0;
+    if (!match || nextLen > matchLen) match = logged;
   }
-  return match;
+  if (!match) return null;
+  const sponsors = mergeSponsorTickets(...lists);
+  return sponsors.length ? { ...match, sponsors } : match;
 }
 
 /** Cached `init-pot` prints for this sponsor. Extra pot ids cover tickets whose sponsors list was not stored. */

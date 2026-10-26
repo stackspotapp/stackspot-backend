@@ -3,9 +3,11 @@ import test from "node:test";
 import {
   applyEventToSponsor,
   mergeSponsorRecord,
+  mergeSponsorTickets,
   normalizeListedSponsor,
   resolveSponsorContract,
   selectSponsorPlatformPrints,
+  sponsorContractFromTicket,
   sponsorIndexKeys,
   toSponsorPageRecord,
   uniqueSponsorPlatformByContract,
@@ -316,4 +318,17 @@ test("sponsor page lists every hub sponsor-platform print, including the same co
   assert.equal(listed.length, 2);
   assert.equal(listed[0].txid, "0xsecond");
   assert.equal(listed[1].txid, "0xfirst");
+});
+
+test("typed (ok ticket) list counts each distinct sponsor contract", () => {
+  const extra = `${WALLET}.other-sponsor`;
+  const merged = mergeSponsorTickets(
+    [
+      { type: "ok", value: { type: "tuple", value: { "sponsor-contract": { type: "principal", value: SPONSOR }, "ticket-id": { value: "1" } } } },
+      { type: "response", ok: true, value: { "sponsor-contract": extra, "ticket-id": "2" } },
+    ],
+  );
+  assert.equal(merged.length, 2);
+  assert.equal(sponsorContractFromTicket(merged[0]), SPONSOR);
+  assert.equal(sponsorContractFromTicket(merged[1]), extra);
 });

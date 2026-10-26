@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { serializeCV, stringAsciiCV, tupleCV, uintCV, principalCV, listCV, someCV } from "@stacks/transactions";
+import { serializeCV, stringAsciiCV, tupleCV, uintCV, principalCV, listCV, someCV, responseOkCV } from "@stacks/transactions";
 import {
   bindingsFromSponsorEvents,
   extractedPotDetails,
@@ -406,4 +406,69 @@ test("owner pots come from pre-init prints, not wallet deploys", () => {
     [pot],
   );
   assert.equal(rows[0].lastEvent, "pre-init");
+});
+
+test("init-pot print for a pot merges every platform-sponsor ticket", () => {
+  const extra = `${OWNER}.other-sponsor`;
+  const print = initPotPrintForPot(
+    [
+      {
+        event: "init-pot",
+        txid: "0xhub",
+        values: {
+          contract: POT,
+          sponsors: [{ "sponsor-contract": SPONSOR, "ticket-id": "1" }],
+        },
+      },
+      {
+        event: "init-pot",
+        txid: "0xlocal",
+        values: {
+          contract: POT,
+          sponsors: [
+            { ok: true, value: { "sponsor-contract": SPONSOR, "ticket-id": "1" } },
+            { ok: true, value: { "sponsor-contract": extra, "ticket-id": "2" } },
+          ],
+        },
+      },
+    ],
+    POT,
+  );
+  assert.equal(print.sponsors.length, 2);
+  assert.deepEqual(
+    print.sponsors.map((row) => row["sponsor-contract"]).sort(),
+    [extra, SPONSOR].sort(),
+  );
+});
+
+test("init-pot hex list of (ok ticket) keeps every sponsor", () => {
+  const extra = `${OWNER}.other-sponsor`;
+  const print = someCV(
+    tupleCV({
+      event: stringAsciiCV("init-pot"),
+      contract: principalCV(POT),
+      sponsors: listCV([
+        responseOkCV(
+          tupleCV({
+            "sponsor-contract": principalCV(SPONSOR),
+            "ticket-id": uintCV(1n),
+          }),
+        ),
+        responseOkCV(
+          tupleCV({
+            "sponsor-contract": principalCV(extra),
+            "ticket-id": uintCV(2n),
+          }),
+        ),
+      ]),
+    }),
+  );
+  const serialized = serializeCV(print);
+  const hex = serialized.startsWith("0x") ? serialized : `0x${serialized}`;
+  const sponsors = sponsorsFromPrintLogs([{ hex }], POT);
+  assert.equal(sponsors.length, 2);
+  assert.deepEqual(
+    sponsors.map((row) => row["sponsor-contract"]).sort(),
+    [extra, SPONSOR].sort(),
+  );
 });

@@ -22,22 +22,27 @@ import {
   parseOptionalPrincipal,
 } from "../potDetails.js";
 import { isPreInitPrintSource } from "../pots.js";
-import { sponsorContractFromTicket } from "../sponsors.js";
+import { mergeSponsorTickets, sponsorContractFromTicket } from "../sponsors.js";
 
 async function listHandler(req, res, next) {
   try {
     const ctx = requestContext(req);
     requireContract(ctx);
-    const seen = new Set();
-    const pots = [];
+    const byKey = new Map();
     for (const event of await loadJoinableInitPotEvents(ctx)) {
       const print = printPayload(initPayloadFromEvent(event));
       if (!print?.txid && !print?.contract) continue;
       const key = String(print.contract ?? print["pot-treasury"] ?? print.txid ?? "").toLowerCase();
-      if (!key || seen.has(key)) continue;
-      seen.add(key);
-      pots.push(print);
+      if (!key) continue;
+      const prev = byKey.get(key);
+      if (prev) {
+        const sponsors = mergeSponsorTickets(prev.sponsors, print.sponsors);
+        if (sponsors.length) prev.sponsors = sponsors;
+        continue;
+      }
+      byKey.set(key, print);
     }
+    const pots = [...byKey.values()];
     res.json({
       ...networkEnvelope(ctx),
       pots,
