@@ -30,6 +30,34 @@ export function isPreInitLogsEvent(event, preInitLogsContract) {
   return source === want;
 }
 
+function loggerName(contractId) {
+  return String(contractId ?? "").split(".")[1]?.toLowerCase() ?? "";
+}
+
+function sourceContractOf(event) {
+  return String(event?.sourceContract ?? event?.contractId ?? "").trim();
+}
+
+/** Prints from `{platform}.stackspots` or `{platform}.stackspot-pre-init-logs`. */
+export function isPlatformLoggerEvent(event, { stackspotsContract, preInitLogsContract } = {}) {
+  const source = sourceContractOf(event).toLowerCase();
+  const spots = String(stackspotsContract ?? "").trim().toLowerCase();
+  const pre = String(preInitLogsContract ?? "").trim().toLowerCase();
+  if (!source) return true;
+  if (spots && source === spots) return true;
+  if (pre && source === pre) return true;
+  const name = loggerName(source);
+  return name === "stackspots" || name === "stackspot-pre-init-logs";
+}
+
+export function platformLoggerEventCount(events = [], opts = {}) {
+  let count = 0;
+  for (const event of events) {
+    if (isPlatformLoggerEvent(event, opts)) count += 1;
+  }
+  return count;
+}
+
 export function preInitLogsEventCount(events = [], preInitLogsContract) {
   const want = String(preInitLogsContract ?? "").trim().toLowerCase();
   let sourced = 0;
@@ -303,6 +331,10 @@ export function computeStatistics(
   }
 
   const loggerEventCount = preInitLogsEventCount(sorted, loggerContract);
+  const platformEventsCount = platformLoggerEventCount(sorted, {
+    stackspotsContract,
+    preInitLogsContract: loggerContract,
+  });
   byStatus.deployed = loggerEventCount;
   byStatus.joinable = pots.filter(potCurrentlyJoinable).length;
   byStatus.started = pots.filter(potWasStarted).length;
@@ -321,7 +353,7 @@ export function computeStatistics(
       started: byStatus.started,
       cancelled: byStatus.cancelled,
       claimed: byStatus.claimed,
-      events: events.length,
+      events: platformEventsCount,
       participants: participants.size,
       sponsors: sponsors.size,
       stxJoined: stxJoined.toString(),

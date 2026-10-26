@@ -153,6 +153,7 @@ test("organises pots and stats from every contract event key", () => {
   );
 
   assert.equal(stats.totals.pots, 2);
+  assert.equal(stats.totals.events, 12);
   assert.equal(stats.totals.deployed, 2);
   assert.equal(stats.totals.joinable, 0);
   assert.equal(stats.totals.started, 1);
@@ -480,4 +481,5 @@ test("pots and deployed count every stackspot-pre-init-logs event and nothing el
   assert.equal(stats.totals.pots, 2);
   assert.equal(stats.totals.deployed, 2);
   assert.equal(stats.byStatus.deployed, 2);
+  assert.equal(stats.totals.events, 5);
 });

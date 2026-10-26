@@ -658,20 +658,29 @@ async function statsHandler(req, res, next) {
         preInitLogsContract: ctx.preInitLogsContract,
       });
       try {
-        if (ctx.preInitLogsContract) {
-          const page = await fetchContractLogsPage({
-            contractId: ctx.preInitLogsContract,
-            limit: 1,
-          });
-          const total = Number(page?.total);
-          if (Number.isFinite(total) && total >= 0) {
-            stats.totals.pots = total;
-            stats.totals.deployed = total;
-            stats.byStatus.deployed = total;
-          }
+        const [preInitPage, stackspotsPage] = await Promise.all([
+          ctx.preInitLogsContract
+            ? fetchContractLogsPage({ contractId: ctx.preInitLogsContract, limit: 1 })
+            : Promise.resolve(null),
+          ctx.contract
+            ? fetchContractLogsPage({ contractId: ctx.contract, limit: 1 })
+            : Promise.resolve(null),
+        ]);
+        const preInitTotal = Number(preInitPage?.total);
+        const stackspotsTotal = Number(stackspotsPage?.total);
+        if (Number.isFinite(preInitTotal) && preInitTotal >= 0) {
+          stats.totals.pots = preInitTotal;
+          stats.totals.deployed = preInitTotal;
+          stats.byStatus.deployed = preInitTotal;
+        }
+        const loggerEvents =
+          (Number.isFinite(stackspotsTotal) && stackspotsTotal >= 0 ? stackspotsTotal : 0) +
+          (Number.isFinite(preInitTotal) && preInitTotal >= 0 ? preInitTotal : 0);
+        if (loggerEvents > 0 || Number.isFinite(stackspotsTotal) || Number.isFinite(preInitTotal)) {
+          stats.totals.events = loggerEvents;
         }
       } catch (error) {
-        console.error("[stats] pre-init-logs total", error.message);
+        console.error("[stats] logger contract totals", error.message);
       }
       await setCachedStats(stats, ctx);
     }

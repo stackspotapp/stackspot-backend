@@ -36,7 +36,7 @@ function keysFor(network) {
     potLive: (id) => `${ns}:pot-live:${String(id).trim().toLowerCase()}`,
     sponsorLive: (id) => `${ns}:sponsor-live:${String(id).trim().toLowerCase()}`,
     contract: (id) => `${ns}:contract:${id}`,
-    stats: `${ns}:stats:snapshot:v3`,
+    stats: `${ns}:stats:snapshot:v4`,
   };
 }
 
