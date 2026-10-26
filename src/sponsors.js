@@ -276,6 +276,59 @@ export function projectNameFromContract(contractId) {
   return text.slice(dot + 1);
 }
 
+export function platformPrintSponsorContract(row) {
+  if (!row || typeof row !== "object") return null;
+  return firstContractId(
+    row["sponsor-contract"],
+    row.sponsorContract,
+    row["contract-address"],
+  );
+}
+
+function isHubPrintSource(row, hubContract) {
+  const hub = String(hubContract ?? "").trim().toLowerCase();
+  if (!hub) return true;
+  const src = String(row?.sourceContract ?? row?.contractId ?? "").trim().toLowerCase();
+  if (!src) return true;
+  return src === hub;
+}
+
+/**
+ * `sponsor-platform` prints, preferring `.stackspots` as the log source.
+ * Lookup filters `sponsor-contract` to the target ADDRESS.NAME.
+ * Input should already be newest-first.
+ */
+export function selectSponsorPlatformPrints(
+  events,
+  { hubContract = "", sponsorContract = "" } = {},
+) {
+  let rows = (Array.isArray(events) ? events : []).filter(
+    (row) => String(row?.event ?? "").trim().toLowerCase() === "sponsor-platform",
+  );
+  const hubRows = rows.filter((row) => isHubPrintSource(row, hubContract));
+  if (hubRows.length) rows = hubRows;
+  const want = String(sponsorContract ?? "").trim().toLowerCase();
+  if (want) {
+    rows = rows.filter(
+      (row) => String(platformPrintSponsorContract(row) ?? "").trim().toLowerCase() === want,
+    );
+  }
+  return rows;
+}
+
+/** One hub print per `sponsor-contract` (newest first). */
+export function uniqueSponsorPlatformByContract(events, hubContract = "") {
+  const selected = selectSponsorPlatformPrints(events, { hubContract });
+  const byContract = new Map();
+  for (const row of selected) {
+    const id = platformPrintSponsorContract(row);
+    if (!id) continue;
+    const key = id.toLowerCase();
+    if (!byContract.has(key)) byContract.set(key, row);
+  }
+  return [...byContract.values()];
+}
+
 /** Add `project-name` from `sponsor-contract` (or `contract-address`). Not stored in Redis. */
 export function withProjectName(sponsor) {
   if (!sponsor || typeof sponsor !== "object") return sponsor;

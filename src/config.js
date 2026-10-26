@@ -10,11 +10,6 @@ import { buildRedisUrl } from "./redisEnv.js";
 
 loadEnv({ path: resolve(fileURLToPath(new URL("..", import.meta.url)), ".env") });
 
-const DEFAULT_CONTRACTS = {
-  mainnet: "SP2HXAW0GEHMXGHR0PG44443HV0S58WSZQY4V26W1.stackspots",
-  testnet: "ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.stackspots",
-};
-
 export const PRE_INIT_LOGS_CONTRACT_NAME = "stackspot-pre-init-logs";
 
 /** Same deployer as stackspots: `{address}.stackspot-pre-init-logs`. */
@@ -50,7 +45,11 @@ function resolveDefaultNetwork() {
 const defaultNetwork = resolveDefaultNetwork();
 
 function contractFor(network) {
-  return namedEnvContract("STACKSPOTS_CONTRACT", network) ?? DEFAULT_CONTRACTS[network] ?? null;
+  return namedEnvContract("STACKSPOTS_CONTRACT", network);
+}
+
+function missingContractMessage(network) {
+  return `No Stackspots contract configured for ${network}. Set STACKSPOTS_CONTRACT_${String(network).toUpperCase()} or STACKSPOTS_CONTRACT in .env.`;
 }
 
 function preInitLogsFor(network, stackspotsId) {
@@ -79,6 +78,11 @@ export function resolveRequestContext(rawNetwork) {
   }
   const network = parseNetwork(rawNetwork) ?? defaultNetwork;
   const contract = contracts[network] ?? null;
+  if (!contract) {
+    const error = new Error(missingContractMessage(network));
+    error.status = 400;
+    throw error;
+  }
   return {
     network,
     networkSource: hasQuery ? "query" : "default",
@@ -86,6 +90,22 @@ export function resolveRequestContext(rawNetwork) {
     preInitLogsContract: preInitLogsContracts[network] ?? preInitLogsFor(network, contract),
     stacksApiUrl: apiUrlForNetwork(network),
   };
+}
+
+/** Fail boot when .env has no hub contract for the default network. */
+export function assertConfiguredContracts() {
+  if (!contracts.mainnet && !contracts.testnet) {
+    const error = new Error(
+      "No Stackspots contract configured. Set STACKSPOTS_CONTRACT_MAINNET and/or STACKSPOTS_CONTRACT_TESTNET in .env.",
+    );
+    error.status = 400;
+    throw error;
+  }
+  if (!contracts[defaultNetwork]) {
+    const error = new Error(missingContractMessage(defaultNetwork));
+    error.status = 400;
+    throw error;
+  }
 }
 
 export const config = {
@@ -109,9 +129,7 @@ export const config = {
 
 export function requireContract(ctx) {
   if (ctx?.contract) return ctx.contract;
-  const error = new Error(
-    `No Stackspots contract configured for ${ctx?.network ?? "unknown"}. Set STACKSPOTS_CONTRACT_${String(ctx?.network ?? "").toUpperCase()}.`,
-  );
+  const error = new Error(missingContractMessage(ctx?.network ?? "unknown"));
   error.status = 400;
   throw error;
 }

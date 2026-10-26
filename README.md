@@ -21,7 +21,7 @@ Nested buffer **fields** (contract hashes) stay as hex.
 ```bash
 cd stackspots-events
 cp .env.example .env
-# edit NETWORK (default when ?network= is omitted), STACKSPOTS_CONTRACT_MAINNET, and STACKSPOTS_CONTRACT_TESTNET
+# edit NETWORK (default when ?network= is omitted). STACKSPOTS_CONTRACT_MAINNET and/or STACKSPOTS_CONTRACT_TESTNET are required — the API will not start without them.
 npm install
 ```
 
@@ -45,10 +45,10 @@ The `npm warn config production Use --omit=dev instead` line from the host is ha
 | `REDIS_URL` | `redis://127.0.0.1:6379` | Redis connection (`rediss://` for Redis Cloud) |
 | `REDIS_ENDPOINT_URI` / `REDIS_PASSWORD` | — | Alternate Redis Cloud credentials if `REDIS_URL` is unset |
 | `NETWORK` | `mainnet` | Default when `?network=` is omitted (`mainnet` or `testnet`) |
-| `STACKSPOTS_CONTRACT_MAINNET` | `SP2HX…W1.stackspots` | Mainnet Stackspots `address.name` |
-| `STACKSPOTS_CONTRACT_TESTNET` | `ST1PQ…GM.stackspots` | Testnet Stackspots `address.name` |
-| `STACKSPOTS_CONTRACT` | — | Fallback mapped to mainnet or testnet from the principal prefix |
-| `STACKSPOTS_PRE_INIT_LOGS_MAINNET` / `_TESTNET` | `{platform}.stackspot-pre-init-logs` | Deploy-time `pre-init` prints (pots call this contract, not stackspots) |
+| `STACKSPOTS_CONTRACT_MAINNET` | required for mainnet | Mainnet Stackspots `address.name` — no hardcoded fallback |
+| `STACKSPOTS_CONTRACT_TESTNET` | required for testnet | Testnet Stackspots `address.name` — no hardcoded fallback |
+| `STACKSPOTS_CONTRACT` | — | Used for the network matching the principal prefix if the named var is unset |
+| `STACKSPOTS_PRE_INIT_LOGS_MAINNET` / `_TESTNET` | `{platform}.stackspot-pre-init-logs` | Deploy-time `pre-init` prints (derived from the configured hub, not a baked-in address) |
 | `STACKS_API_URL` | from `NETWORK` | Optional override for the selected network |
 | `STACKS_MAINNET_API_URL` | `https://api.hiro.so` | Mainnet Hiro host |
 | `STACKS_TESTNET_API_URL` | `https://api.testnet.hiro.so` | Testnet Hiro host |

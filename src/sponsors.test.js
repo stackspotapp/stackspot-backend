@@ -5,8 +5,10 @@ import {
   mergeSponsorRecord,
   normalizeListedSponsor,
   resolveSponsorContract,
+  selectSponsorPlatformPrints,
   sponsorIndexKeys,
   toSponsorPageRecord,
+  uniqueSponsorPlatformByContract,
   withProjectName,
 } from "./sponsors.js";
 
@@ -242,4 +244,49 @@ test("project-name is the contract name after the dot", () => {
   });
   assert.equal(row["project-name"], "stackspot-sponsor");
   assert.equal(withProjectName({ sponsor: WALLET })["project-name"], undefined);
+});
+
+test("lookup keeps hub sponsor-platform prints filtered by sponsor-contract", () => {
+  const other = `${WALLET}.pc-mag`;
+  const rows = [
+    {
+      event: "sponsor-platform",
+      sourceContract: STACKSPOTS,
+      "sponsor-contract": other,
+      "logo-url": "https://stackspot.app/icons/logo.png",
+      description: "pc mag",
+      txid: "0xhub-other",
+    },
+    {
+      event: "sponsor-platform",
+      sourceContract: SPONSOR,
+      "sponsor-contract": SPONSOR,
+      txid: "0xlocal",
+    },
+    {
+      event: "sponsor-platform",
+      sourceContract: STACKSPOTS,
+      "sponsor-contract": SPONSOR,
+      "logo-url": "https://example.com/logo.png",
+      description: "kings vibes",
+      txid: "0xhub",
+    },
+    {
+      event: "sponsor-event",
+      sourceContract: STACKSPOTS,
+      "sponsor-contract": SPONSOR,
+      txid: "0xticket",
+    },
+  ];
+  const listed = uniqueSponsorPlatformByContract(rows, STACKSPOTS);
+  assert.equal(listed.length, 2);
+  assert.equal(listed[0]["sponsor-contract"], other);
+  assert.equal(listed[0]["logo-url"], "https://stackspot.app/icons/logo.png");
+  const hit = selectSponsorPlatformPrints(rows, {
+    hubContract: STACKSPOTS,
+    sponsorContract: SPONSOR,
+  });
+  assert.equal(hit.length, 1);
+  assert.equal(hit[0].txid, "0xhub");
+  assert.equal(hit[0]["logo-url"], "https://example.com/logo.png");
 });

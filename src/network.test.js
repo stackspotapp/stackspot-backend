@@ -45,6 +45,7 @@ test("query network=testnet switches Hiro and marks source=query", () => {
   assert.equal(ctx.network, "testnet");
   assert.equal(ctx.networkSource, "query");
   assert.equal(ctx.stacksApiUrl, "https://api.testnet.hiro.so");
+  assert.ok(ctx.contract, "STACKSPOTS_CONTRACT_TESTNET (or STACKSPOTS_CONTRACT) must be set in .env");
   assert.equal(
     ctx.preInitLogsContract,
     platformSiblingContract(ctx.contract, "stackspot-pre-init-logs"),

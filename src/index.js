@@ -3,7 +3,12 @@ import express from "express";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { STACKSPOTS_EVENTS, toPublicEvent } from "./catalog.js";
-import { sponsorContractFromTicket, withProjectName } from "./sponsors.js";
+import {
+  sponsorContractFromTicket,
+  selectSponsorPlatformPrints,
+  uniqueSponsorPlatformByContract,
+  withProjectName,
+} from "./sponsors.js";
 import {
   compactStoredEvents,
   rebuildSponsorsFromEvents,
@@ -21,7 +26,13 @@ import {
   setCachedContract,
   setCachedStats,
 } from "./cache.js";
-import { config, isAcceptedPrintSource, requireContract, resolveRequestContext } from "./config.js";
+import {
+  assertConfiguredContracts,
+  config,
+  isAcceptedPrintSource,
+  requireContract,
+  resolveRequestContext,
+} from "./config.js";
 import { decodeClarityResult } from "./decoder.js";
 import { serializeArgs } from "./encode.js";
 import {
@@ -116,6 +127,16 @@ function printPayload(event) {
   if (!event || typeof event !== "object") return event;
   const { sourceContract: _source, ...print } = event;
   return print;
+}
+
+async function loadSponsorPlatformEvents(ctx) {
+  const { ids } = await listEventIds({
+    ...ctx,
+    eventName: "sponsor-platform",
+    offset: 0,
+    limit: 1_000_000,
+  });
+  return (await getEventsByIds(ids, ctx)).map(withProjectName);
 }
 
 const app = express();
@@ -481,23 +502,11 @@ app.get("/sponsors", async (req, res, next) => {
   try {
     const ctx = requestContext(req);
     requireContract(ctx);
-    // Prints, not the derived sponsor hash. That hash can be empty after a cache compact.
-    const { ids } = await listEventIds({
-      ...ctx,
-      eventName: "sponsor-platform",
-      offset: 0,
-      limit: 1_000_000,
-    });
-    const seenTx = new Set();
-    const sponsors = (await getEventsByIds(ids, ctx))
-      .map(withProjectName)
-      .filter((row) => {
-        const txid = row?.txid;
-        if (!txid || seenTx.has(txid)) return false;
-        seenTx.add(txid);
-        return true;
-      })
-      .map((row) => printPayload(row));
+    // Hub `.stackspots` sponsor-platform prints (logo-url / description live here, not on live state).
+    const sponsors = uniqueSponsorPlatformByContract(
+      await loadSponsorPlatformEvents(ctx),
+      ctx.contract,
+    ).map((row) => printPayload(row));
     const refresh = req.query.refresh === "1" || req.query.refresh === "true";
     const withLive = await attachSponsorContractLives(sponsors, ctx, { refresh });
     res.json({ ...networkEnvelope(ctx), sponsors: withLive, total: withLive.length });
@@ -550,19 +559,28 @@ app.get("/sponsors/:address", async (req, res, next) => {
     const ctx = requestContext(req);
     requireContract(ctx);
     const address = decodeURIComponent(req.params.address);
+    const platformPrints = selectSponsorPlatformPrints(await loadSponsorPlatformEvents(ctx), {
+      hubContract: ctx.contract,
+      sponsorContract: address,
+    }).map((row) => printPayload(row));
     const { ids, total } = await listEventIds({
       ...ctx,
       sponsor: address,
       limit: 1_000_000,
       offset: 0,
     });
-    const events = (await getEventsByIds(ids, ctx)).map((event) => printPayload(withProjectName(event)));
-    const sponsor =
-      events.find((event) => event.event === "sponsor-platform") ??
-      events.find(
-        (event) => event["sponsor-contract"] === address || event["contract-address"] === address,
-      ) ??
-      null;
+    const indexed = (await getEventsByIds(ids, ctx)).map((event) => printPayload(withProjectName(event)));
+    const seen = new Set(platformPrints.map((row) => row?.txid).filter(Boolean));
+    const events = [
+      ...platformPrints,
+      ...indexed.filter((row) => {
+        const txid = row?.txid;
+        if (txid && seen.has(txid)) return false;
+        if (txid) seen.add(txid);
+        return true;
+      }),
+    ];
+    const sponsor = platformPrints[0] ?? null;
     if (!sponsor && !events.length) {
       res.status(404).json({ error: "Sponsor not found", address, ...networkEnvelope(ctx) });
       return;
@@ -575,7 +593,7 @@ app.get("/sponsors/:address", async (req, res, next) => {
       ...networkEnvelope(ctx),
       sponsor: withLive ?? sponsor,
       events,
-      total,
+      total: Math.max(total, events.length),
     });
   } catch (error) {
     next(error);
@@ -915,6 +933,7 @@ async function poll() {
 }
 
 export async function start() {
+  assertConfiguredContracts();
   await connectRedis();
   const redisUrl = new URL(config.redisUrl);
   if (redisUrl.password) redisUrl.password = "***";
