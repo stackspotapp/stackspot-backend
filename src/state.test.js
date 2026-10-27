@@ -67,20 +67,22 @@ test("platform state counts logger prints, not live pots", () => {
   assert.equal(stats.kind, "platform-state-v1");
 });
 
-test("joinable is init-pot minus started minus cancelled", () => {
+test("joinable is unique hub init pots minus started minus cancelled", () => {
   const stats = computePlatformState(
     [
       { event: "init-pot", sourceContract: HUB, values: { contract: POT } },
+      { event: "init-pot", sourceContract: POT, values: { contract: POT } },
+      { event: "register-pot", sourceContract: HUB, values: { "pot-address": POT, contract: POT } },
       { event: "init-pot", sourceContract: HUB, values: { contract: `${POT}2` } },
       { event: "init-pot", sourceContract: HUB, values: { contract: `${POT}3` } },
-      { event: "start-pot", sourceContract: HUB, values: {} },
+      { event: "start-pot", sourceContract: HUB, values: { "pot-contract": POT } },
     ],
     { stackspotsContract: HUB, preInitLogsContract: LOGS },
   );
   assert.equal(stats.totals.joinable, 2);
 });
 
-test("hiro logger totals overlay deployed and events", () => {
+test("hiro logger totals overlay events; pots stay unique pre-init rows", () => {
   const stats = computePlatformState(
     [{ event: "pre-init", sourceContract: LOGS, values: {} }],
     {
@@ -89,7 +91,7 @@ test("hiro logger totals overlay deployed and events", () => {
       eventTotals: { preInit: 9, stackspots: 40 },
     },
   );
-  assert.equal(stats.totals.deployed, 9);
-  assert.equal(stats.totals.pots, 9);
+  assert.equal(stats.totals.deployed, 1);
+  assert.equal(stats.totals.pots, 1);
   assert.equal(stats.totals.events, 49);
 });

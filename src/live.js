@@ -1,13 +1,11 @@
 import {
   forgetEventIdsForTx,
-  getEventsByIds,
   getPotLives,
-  listEventIds,
   setStoredInitPotSponsors,
 } from "./cache.js";
 import { fetchTransaction, normalizeLog } from "./hiro.js";
-import { printPayload } from "./http.js";
-import { loadLivePotDetails, sponsorsFromPrintLogs } from "./potDetails.js";
+import { loadEventsByNames, printPayload } from "./http.js";
+import { initPayloadFromEvent, loadLivePotDetails, sponsorsFromPrintLogs } from "./potDetails.js";
 import { isJoinableInitPotEvent } from "./pots.js";
 import { mergeSponsorTickets } from "./sponsors.js";
 
@@ -108,18 +106,31 @@ export async function attachInitPotTickets(prints, ctx) {
 }
 
 export async function loadInitPotEvents(ctx) {
-  const { ids } = await listEventIds({ ...ctx, eventName: "init-pot", offset: 0, limit: 1_000_000 });
-  return getEventsByIds(ids, ctx);
+  return loadEventsByNames(ctx, ["init-pot", "register-pot", "pot-registered"]);
 }
 
 export async function loadJoinableInitPotEvents(ctx) {
-  const initEvents = await loadInitPotEvents(ctx);
-  return initEvents.filter((event) =>
-    isJoinableInitPotEvent(event, {
-      stackspotsContract: ctx.contract,
-      preInitLogsContract: ctx.preInitLogsContract,
-    }),
-  );
+  const opts = {
+    stackspotsContract: ctx.contract,
+    preInitLogsContract: ctx.preInitLogsContract,
+  };
+  const byPot = new Map();
+  for (const event of await loadInitPotEvents(ctx)) {
+    if (!isJoinableInitPotEvent(event, opts)) continue;
+    const logged = initPayloadFromEvent(event);
+    if (!logged) continue;
+    const key = String(logged.contract ?? logged["pot-treasury"] ?? "").trim().toLowerCase();
+    if (!key) continue;
+    const prev = byPot.get(key);
+    const sponsors = mergeSponsorTickets(prev?.sponsors, logged.sponsors);
+    byPot.set(key, {
+      ...event,
+      ...logged,
+      event: "init-pot",
+      ...(sponsors.length ? { sponsors } : {}),
+    });
+  }
+  return [...byPot.values()];
 }
 
 export { printPayload };

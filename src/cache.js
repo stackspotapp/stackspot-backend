@@ -1,6 +1,6 @@
 import { createClient } from "redis";
 import { eventDedupeId, eventPrint, toPublicEvent } from "./catalog.js";
-import { config, platformSiblingContract, PRE_INIT_LOGS_CONTRACT_NAME } from "./config.js";
+import { config, isAcceptedPrintSource, platformSiblingContract, PRE_INIT_LOGS_CONTRACT_NAME } from "./config.js";
 import { fetchTransaction } from "./hiro.js";
 import { apiUrlForNetwork } from "./network.js";
 import {
@@ -378,8 +378,9 @@ export async function compactStoredEvents(ctx = {}) {
     const next = stored
       ? { ...stored, ...(event?.sourceContract ? { sourceContract: event.sourceContract } : {}) }
       : null;
-    if (!next) {
-      const name = event?.event ?? eventPrint(event).event;
+    const source = event?.sourceContract ?? event?.contractId ?? next?.sourceContract;
+    if (!next || (source && !isAcceptedPrintSource(source, ctx))) {
+      const name = event?.event ?? eventPrint(event).event ?? next?.event;
       const multi = redis.multi();
       multi.del(keys.event(id));
       multi.zRem(keys.events, id);

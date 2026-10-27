@@ -62,14 +62,13 @@ function sourceContractOf(event) {
 }
 
 /**
- * Joinable pots page: `init-pot` prints only (not `pot-registered`).
- * Clarity prints `init-pot` on the pot, then `register-pot` on stackspots (no pot-registered print).
- * Count stackspots-sourced rows and pot-local `init-pot` logs.
+ * Joinable pots: hub `.stackspots` `init-pot` / `register-pot` prints only.
+ * Pot-local prints are not cached.
  */
 export function isJoinableInitPotEvent(event, { stackspotsContract, preInitLogsContract } = {}) {
   const print = eventPrint(event);
   const name = String(print.event ?? event?.event ?? "").trim();
-  if (name !== "init-pot") return false;
+  if (name !== "init-pot" && name !== "register-pot" && name !== "pot-registered") return false;
   const source = sourceContractOf(event).toLowerCase();
   if (!source) return true;
   const preInit = String(preInitLogsContract ?? "").trim().toLowerCase();
@@ -77,8 +76,7 @@ export function isJoinableInitPotEvent(event, { stackspotsContract, preInitLogsC
   if (contractNameOf(source) === "stackspot-pre-init-logs") return false;
   const want = String(stackspotsContract ?? "").trim().toLowerCase();
   if (want && source === want) return true;
-  if (contractNameOf(source) === "stackspots") return true;
-  return isLikelyPotContract(sourceContractOf(event));
+  return contractNameOf(source) === "stackspots";
 }
 
 export function isPotContractId(value) {
@@ -110,18 +108,13 @@ export function isLikelyPotContract(value) {
   return true;
 }
 
-/**
- * Pre-init is printed on the pot and again on stackspot-pre-init-logs.
- * Redis keeps one row; sourceContract may be the pot after the second sync.
- */
+/** Pre-init rows come from `{platform}.stackspot-pre-init-logs` only. */
 export function isPreInitPrintSource(source, { preInitLogsContract } = {}) {
   const src = String(source ?? "").trim().toLowerCase();
   if (!src) return true;
   const logs = String(preInitLogsContract ?? "").trim().toLowerCase();
   if (logs && src === logs) return true;
-  const name = src.split(".")[1] ?? "";
-  if (name === "stackspot-pre-init-logs") return true;
-  return isLikelyPotContract(source);
+  return (src.split(".")[1] ?? "") === "stackspot-pre-init-logs";
 }
 
 function firstContractId(...candidates) {

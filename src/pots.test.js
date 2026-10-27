@@ -16,11 +16,11 @@ import {
 const POT = "ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.jackpot";
 const STACKSPOTS = "ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.stackspots";
 
-test("pre-init source accepts logger and pot-local prints", () => {
+test("pre-init source is the logger contract only", () => {
   const PRE_INIT = "ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.stackspot-pre-init-logs";
   const opts = { stackspotsContract: STACKSPOTS, preInitLogsContract: PRE_INIT };
   assert.equal(isPreInitPrintSource(PRE_INIT, opts), true);
-  assert.equal(isPreInitPrintSource(POT, opts), true);
+  assert.equal(isPreInitPrintSource(POT, opts), false);
   assert.equal(isPreInitPrintSource("", opts), true);
   assert.equal(isPreInitPrintSource(STACKSPOTS, opts), false);
   assert.equal(isPreInitPrintSource("ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.sbtc-token", opts), false);
@@ -50,7 +50,7 @@ test("pre-init uses pot-contract and marks deployed", () => {
   assert.equal(record.potType, "jackpot");
 });
 
-test("joinable pots are init-pot logs, not pot-registered", () => {
+test("joinable pots are hub init-pot or register-pot prints", () => {
   const PRE_INIT = "ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.stackspot-pre-init-logs";
   const opts = { stackspotsContract: STACKSPOTS, preInitLogsContract: PRE_INIT };
   assert.equal(
@@ -65,14 +65,14 @@ test("joinable pots are init-pot logs, not pot-registered", () => {
       { event: "init-pot", sourceContract: POT, contract: POT },
       opts,
     ),
-    true,
+    false,
   );
   assert.equal(
     isJoinableInitPotEvent(
       { event: "pot-registered", sourceContract: STACKSPOTS, "pot-address": POT },
       opts,
     ),
-    false,
+    true,
   );
   assert.equal(
     isJoinableInitPotEvent(

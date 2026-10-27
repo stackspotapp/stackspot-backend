@@ -71,8 +71,8 @@ test("pre-init logs sit on the platform sibling contract", () => {
     false,
   );
   assert.equal(
-    isAcceptedPrintSource("ST4KKK958A2BG93J06GE9S9Q80WCCMA7QXW2AFRT.crowd-fund", ctx, "ST4KKK958A2BG93J06GE9S9Q80WCCMA7QXW2AFRT.crowd-fund"),
-    true,
+    isAcceptedPrintSource("ST4KKK958A2BG93J06GE9S9Q80WCCMA7QXW2AFRT.crowd-fund", ctx),
+    false,
   );
 });
 

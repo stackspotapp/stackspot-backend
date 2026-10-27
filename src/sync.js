@@ -6,7 +6,6 @@ import { apiUrlForNetwork } from "./network.js";
 import {
   areEventIdsKnown,
   forgetAllEventIds,
-  getEventsByIds,
   listEventIds,
   markFullPrintSchema,
   needsFullPrintRefetch,
@@ -61,7 +60,7 @@ async function syncContract(contractId, ctx, { full, maxPages } = {}) {
   const mapped = logs.map(toCachedEvent);
   const kept = mapped.filter((event) => {
     if (!event || event.skip) return false;
-    return isAcceptedPrintSource(event.contractId, ctx, contractId);
+    return isAcceptedPrintSource(event.contractId, ctx);
   });
   const skipped = mapped.filter((event) => event?.skip && !event.retry).map((event) => event.id);
   const stored = await saveEvents(kept, ctx);
@@ -165,55 +164,6 @@ export async function runSync({ full = false, network, contract } = {}) {
       );
     } catch (error) {
       console.error(`[sync] ${ctx.network} ${ctx.preInitLogsContract}`, error.message);
-    }
-  }
-
-  const { ids: preInitIds } = await listEventIds({
-    ...ctx,
-    eventName: "pre-init",
-    offset: 0,
-    limit: 1_000_000,
-  });
-  const preInitEvents = await getEventsByIds(preInitIds, ctx);
-  const potContracts = [];
-  const seenPot = new Set();
-  for (const event of preInitEvents) {
-    const id = String(event?.["pot-contract"] ?? event?.["pot-treasury"] ?? "").trim();
-    const key = id.toLowerCase();
-    if (!key || seenPot.has(key) || !isLikelyPotContract(id)) continue;
-    seenPot.add(key);
-    potContracts.push(id);
-  }
-  const synced = new Set(
-    [ctx.contract, ctx.preInitLogsContract].filter(Boolean).map((id) => String(id)),
-  );
-  if (potContracts.length) {
-    console.log(`[sync] ${ctx.network} fetching init-pot from ${potContracts.length} pot contracts`);
-    const extra = await syncContracts(potContracts, ctx, { full, maxPages: 8, synced });
-    fetched += extra.fetched;
-    stored += extra.stored;
-    if (extra.mode) mode = extra.mode;
-  }
-
-  const platformOwner = String(ctx.contract ?? "").split(".")[0];
-  if (platformOwner) {
-    try {
-      console.log(`[sync] ${ctx.network} fetching deployed contracts for ${platformOwner}`);
-      const owner = await syncOwnerDeployedPots(platformOwner, ctx, {
-        full,
-        maxPages: 8,
-        synced,
-      });
-      fetched += owner.fetched;
-      stored += owner.stored;
-      if (owner.mode) mode = owner.mode;
-      if (owner.contracts?.length) {
-        console.log(
-          `[sync] ${ctx.network} owner deploys stored ${owner.stored}/${owner.fetched} (${owner.contracts.length} contracts)`,
-        );
-      }
-    } catch (error) {
-      console.error(`[sync] ${ctx.network} owner deploys ${platformOwner}`, error.message);
     }
   }
 

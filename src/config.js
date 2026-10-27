@@ -134,12 +134,14 @@ export function requireContract(ctx) {
   throw error;
 }
 
-/** Hiro print source we ingest: stackspots, pre-init-logs, or the contract currently being synced. */
-export function isAcceptedPrintSource(source, ctx = {}, fetchingContractId = null) {
+/** Cached prints come only from `{platform}.stackspots` and `{platform}.stackspot-pre-init-logs`. */
+export function isAcceptedPrintSource(source, ctx = {}) {
   const src = String(source ?? "").trim().toLowerCase();
   if (!src) return true;
-  const allowed = [ctx.contract, ctx.preInitLogsContract, fetchingContractId]
+  const allowed = [ctx.contract, ctx.preInitLogsContract]
     .filter(Boolean)
     .map((id) => String(id).trim().toLowerCase());
-  return allowed.includes(src);
+  if (allowed.includes(src)) return true;
+  const name = src.split(".")[1] ?? "";
+  return name === "stackspots" || name === "stackspot-pre-init-logs";
 }
