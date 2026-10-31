@@ -11,6 +11,8 @@ const START_NAMES = new Set([
 const CANCEL_NAMES = new Set(["cancel-pot", "fall-back-cancel"]);
 const CLAIM_NAMES = new Set(["claim-pot-reward"]);
 const REGISTER_NAMES = new Set(["register-pot", "pot-registered"]);
+const JOIN_NAMES = new Set(["join-pot"]);
+const JOIN_SPONSOR_NAMES = new Set(["join-pot-as-sponsor"]);
 
 export function emptyPlatformState() {
   return {
@@ -56,7 +58,12 @@ export function emptyPlatformState() {
  * Started: start-pot (+ v3 aliases) on `.stackspots`
  * Cancelled: cancel-pot / fall-back-cancel on `.stackspots`
  * Joinable: unique hub init/register pots that have not started or cancelled
- * Claimed: unique claim-pot-reward pots on `.stackspots`
+ * Claimed: claim-pot-reward print count on `.stackspots`
+ * Participants / Joined: join-pot print count
+ * Sponsors: join-pot-as-sponsor print count
+ * STX in pots: sum of join-pot `amount`
+ * STX stacked: sum of start-pot `pot-value`
+ * Yield claimed: sum of claim-pot-reward `pot-yield-amount`
  * Events: hub + pre-init-logs totals
  * Deploy fees: sum of pot-deploy-fee on register-pot / pot-registered (hub)
  */
@@ -97,6 +104,8 @@ export function computePlatformState(
   const cancels = [];
   const claims = [];
   const registers = [];
+  const joins = [];
+  const joinSponsors = [];
 
   for (const event of events) {
     const name = eventNameOf(event);
@@ -112,6 +121,8 @@ export function computePlatformState(
     if (START_NAMES.has(name)) starts.push(event);
     else if (CANCEL_NAMES.has(name)) cancels.push(event);
     else if (CLAIM_NAMES.has(name)) claims.push(event);
+    else if (JOIN_NAMES.has(name)) joins.push(event);
+    else if (JOIN_SPONSOR_NAMES.has(name)) joinSponsors.push(event);
     if (REGISTER_NAMES.has(name)) registers.push(event);
   }
 
@@ -121,15 +132,37 @@ export function computePlatformState(
     deployFees += asUstx(print["pot-deploy-fee"] ?? print.potDeployFee);
   }
 
+  let stxJoined = 0n;
+  for (const event of joins) {
+    const print = eventPrint(event);
+    stxJoined += asUstx(print.amount);
+  }
+  let stxSponsored = 0n;
+  for (const event of joinSponsors) {
+    const print = eventPrint(event);
+    stxSponsored += asUstx(print.amount);
+  }
+  let staked = 0n;
+  for (const event of starts) {
+    const print = eventPrint(event);
+    staked += asUstx(print["pot-value"] ?? print.potValue);
+  }
+  let yieldClaimed = 0n;
+  for (const event of claims) {
+    const print = eventPrint(event);
+    yieldClaimed += asUstx(print["pot-yield-amount"] ?? print.potYieldAmount);
+  }
+
   const deployedKeys = uniquePotKeys(preInit);
   const initKeys = uniquePotKeys(initPots);
   const startedKeys = uniquePotKeys(starts);
   const cancelledKeys = uniquePotKeys(cancels);
-  const claimedKeys = uniquePotKeys(claims);
   const deployed = deployedKeys.size;
   const started = startedKeys.size;
   const cancelled = cancelledKeys.size;
-  const claimed = claimedKeys.size;
+  const claimed = claims.length;
+  const participants = joins.length;
+  const sponsors = joinSponsors.length;
   let joinable = 0;
   for (const key of initKeys) {
     if (!startedKeys.has(key) && !cancelledKeys.has(key)) joinable += 1;
@@ -141,7 +174,7 @@ export function computePlatformState(
     (Number.isFinite(preTotal) && preTotal >= 0 ? preTotal : 0);
 
   const state = emptyPlatformState();
-  state.kind = "platform-state-v1";
+  state.kind = "platform-state-v2";
   state.byEvent = byEvent;
   state.byStatus = { deployed, joinable, started, cancelled, claimed };
   state.totals = {
@@ -152,7 +185,25 @@ export function computePlatformState(
     started,
     cancelled,
     claimed,
-    events: eventsTotal > 0 ? eventsTotal : preInit.length + (byEvent["init-pot"] ?? 0) + starts.length + cancels.length + claims.length + registers.length,
+    participants,
+    sponsors,
+    stxJoined: stxJoined.toString(),
+    stxSponsored: stxSponsored.toString(),
+    stxTotal: stxJoined.toString(),
+    staked: staked.toString(),
+    yieldClaimed: yieldClaimed.toString(),
+    rewardsPaid: yieldClaimed.toString(),
+    events:
+      eventsTotal > 0
+        ? eventsTotal
+        : preInit.length +
+          (byEvent["init-pot"] ?? 0) +
+          starts.length +
+          cancels.length +
+          claims.length +
+          registers.length +
+          joins.length +
+          joinSponsors.length,
     deployFees: deployFees.toString(),
   };
   return state;

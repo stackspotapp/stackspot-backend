@@ -20,6 +20,8 @@ const STATE_EVENT_NAMES = [
   "claim-pot-reward",
   "register-pot",
   "pot-registered",
+  "join-pot",
+  "join-pot-as-sponsor",
 ];
 
 async function hiroLoggerTotals(ctx) {
@@ -60,7 +62,7 @@ async function stateHandler(req, res, next) {
     requireContract(ctx);
     const refresh = req.query.refresh === "1" || req.query.refresh === "true";
     let stats = !refresh ? await getCachedStats(ctx) : null;
-    if (!stats || stats.kind !== "platform-state-v1") {
+    if (!stats || stats.kind !== "platform-state-v2") {
       stats = await buildState(ctx);
       await setCachedStats(stats, ctx);
     }

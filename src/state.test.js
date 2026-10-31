@@ -64,7 +64,59 @@ test("platform state counts logger prints, not live pots", () => {
   assert.equal(stats.totals.claimed, 1);
   assert.equal(stats.totals.joinable, 0);
   assert.equal(stats.totals.deployFees, "1000000");
-  assert.equal(stats.kind, "platform-state-v1");
+  assert.equal(stats.kind, "platform-state-v2");
+});
+
+test("join/start/claim prints fill participants, STX, stacked, and yield", () => {
+  const stats = computePlatformState(
+    [
+      {
+        event: "join-pot",
+        sourceContract: HUB,
+        values: { "pot-contract": POT, amount: "2000000" },
+      },
+      {
+        event: "join-pot",
+        sourceContract: HUB,
+        values: { "pot-contract": POT, amount: "3000000" },
+      },
+      {
+        event: "join-pot",
+        sourceContract: POT,
+        values: { "pot-contract": POT, amount: "999999999" },
+      },
+      {
+        event: "join-pot-as-sponsor",
+        sourceContract: HUB,
+        values: { "pot-contract": POT, amount: "400000" },
+      },
+      {
+        event: "start-pot",
+        sourceContract: HUB,
+        values: { "pot-contract": POT, "pot-value": "5400000" },
+      },
+      {
+        event: "claim-pot-reward",
+        sourceContract: HUB,
+        values: { "pot-contract": POT, "pot-yield-amount": "12" },
+      },
+      {
+        event: "claim-pot-reward",
+        sourceContract: HUB,
+        values: { "pot-contract": POT, "pot-yield-amount": "8" },
+      },
+    ],
+    { stackspotsContract: HUB, preInitLogsContract: LOGS },
+  );
+
+  assert.equal(stats.totals.participants, 2);
+  assert.equal(stats.totals.sponsors, 1);
+  assert.equal(stats.totals.stxJoined, "5000000");
+  assert.equal(stats.totals.stxTotal, "5000000");
+  assert.equal(stats.totals.stxSponsored, "400000");
+  assert.equal(stats.totals.staked, "5400000");
+  assert.equal(stats.totals.claimed, 2);
+  assert.equal(stats.totals.yieldClaimed, "20");
 });
 
 test("joinable is unique hub init pots minus started minus cancelled", () => {
